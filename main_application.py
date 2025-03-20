@@ -31,6 +31,10 @@ class MainApplication(QMainWindow):
         self.initUI()
         self.loadSettings()
         self.setup_drag_drop()
+        self.thumbnail_view = ThumbnailGridView(
+        thumbnail_size=self.settings['ui']['thumbnail_size'],
+        columns=self.settings['ui']['grid_columns']
+    )
         
     def initUI(self):
         self.setWindowTitle(self.title)
