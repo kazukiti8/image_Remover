@@ -17,6 +17,7 @@ from image_zoom_widget import ZoomableImageWidget, MultiViewImageWidget
 from settings_manager import SettingsManager, SettingsDialog
 
 
+
 class MainApplication(QMainWindow):
     """画像クリーンアップシステムのメインアプリケーション"""
     
