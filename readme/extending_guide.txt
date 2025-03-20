@@ -1,0 +1,478 @@
+# 画像クリーンアップシステム - 拡張ガイド
+
+このドキュメントでは、画像クリーンアップシステムを拡張して新しい機能を追加する方法について説明します。
+
+## 目次
+
+1. [基本的な拡張方法](#基本的な拡張方法)
+2. [新しい検出アルゴリズムの追加](#新しい検出アルゴリズムの追加)
+3. [新しいUI要素の追加](#新しいUI要素の追加)
+4. [設定の拡張](#設定の拡張)
+5. [実装例](#実装例)
+
+## 基本的な拡張方法
+
+画像クリーンアップシステムは、モジュール構造で設計されているため、機能を拡張しやすくなっています。一般的な拡張手順は以下の通りです：
+
+1. 新しい機能のモジュールファイルを作成する
+2. 必要なクラスとメソッドを実装する
+3. メインアプリケーションに新しい機能を統合する
+
+### 推奨事項
+
+- 各機能はできるだけ独立したモジュールとして実装してください
+- 既存のクラスを拡張するよりも、新しいクラスを作成する方が望ましいです
+- ファイル名と主要クラス名は機能を表す名前にしてください
+- 公開APIには適切なドキュメントを追加してください
+
+## 新しい検出アルゴリズムの追加
+
+新しい画像検出アルゴリズム（例：顔検出、シーン分類など）を追加するには：
+
+### 1. 検出アルゴリズムを実装する
+
+```python
+# face_detection.py
+
+import cv2
+import numpy as np
+
+class FaceDetector:
+    """顔検出クラス"""
+    
+    def __init__(self, settings=None):
+        self.settings = settings or {}
+        # 顔検出用の分類器をロード
+        self.face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        )
+    
+    def detect_faces(self, image_path):
+        """画像内の顔を検出"""
+        try:
+            # 画像を読み込み
+            img = cv2.imread(str(image_path))
+            if img is None:
+                return 0, []
+                
+            # グレースケールに変換
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            
+            # 顔検出を実行
+            faces = self.face_cascade.detectMultiScale(
+                gray,
+                scaleFactor=1.1,
+                minNeighbors=5,
+                minSize=(30, 30)
+            )
+            
+            return len(faces), faces
+            
+        except Exception as e:
+            print(f"顔検出エラー ({image_path}): {e}")
+            return 0, []
+```
+
+### 2. `image_cleanup_system.py` に検出メソッドを追加する
+
+```python
+def detect_faces(self):
+    """画像内の顔を検出"""
+    print("顔を検出中...")
+    from face_detection import FaceDetector
+    
+    detector = FaceDetector()
+    image_files = self.get_image_files()
+    
+    faces_in_images = []
+    
+    for img_path in image_files:
+        face_count, _ = detector.detect_faces(img_path)
+        if face_count > 0:
+            faces_in_images.append((img_path, face_count))
+    
+    return faces_in_images
+```
+
+### 3. メインアプリケーションに新機能を統合する
+
+`main_application.py` のメニューやツールバーに新しい検出機能を追加します：
+
+```python
+# メニュー項目を追加
+detect_faces_action = QAction("顔を検出", self)
+detect_faces_action.triggered.connect(self.detect_faces)
+detect_menu.addAction(detect_faces_action)
+
+# 対応するメソッドを実装
+def detect_faces(self):
+    """顔検出を実行"""
+    if not self.cleanup_system:
+        self.show_no_directory_message()
+        return
+    
+    self.statusBar.showMessage("顔を検出中...")
+    QApplication.processEvents()
+    
+    # 顔検出を実行
+    faces_in_images = self.cleanup_system.detect_faces()
+    
+    # 結果を表示
+    images_with_faces = [img for img, _ in faces_in_images]
+    self.show_detection_results("顔を含む画像", images_with_faces)
+```
+
+## 新しいUI要素の追加
+
+新しいUIウィジェットや機能を追加するには：
+
+### 1. 独立したウィジェットとして実装する
+
+```python
+# image_annotator.py
+
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
+                           QLabel, QColorDialog, QSlider)
+from PyQt5.QtGui import QPainter, QPen, QColor
+from PyQt5.QtCore import Qt, QPoint
+
+class ImageAnnotator(QWidget):
+    """画像注釈ツール"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.image_path = None
+        self.drawing = False
+        self.last_point = QPoint()
+        self.current_color = QColor(255, 0, 0)  # 赤
+        self.line_width = 3
+        self.initUI()
+    
+    def initUI(self):
+        layout = QVBoxLayout()
+        
+        # ツールバー
+        toolbar = QHBoxLayout()
+        
+        # 色選択ボタン
+        self.color_btn = QPushButton("色の選択")
+        self.color_btn.clicked.connect(self.choose_color)
+        toolbar.addWidget(self.color_btn)
+        
+        # 線の太さスライダー
+        toolbar.addWidget(QLabel("線の太さ:"))
+        self.width_slider = QSlider(Qt.Horizontal)
+        self.width_slider.setRange(1, 20)
+        self.width_slider.setValue(self.line_width)
+        self.width_slider.valueChanged.connect(self.set_line_width)
+        toolbar.addWidget(self.width_slider)
+        
+        # クリアボタン
+        self.clear_btn = QPushButton("クリア")
+        self.clear_btn.clicked.connect(self.clear_annotation)
+        toolbar.addWidget(self.clear_btn)
+        
+        layout.addLayout(toolbar)
+        
+        # 描画エリア
+        self.drawing_area = QLabel()
+        self.drawing_area.setStyleSheet("background-color: white; border: 1px solid #ccc;")
+        self.drawing_area.setMinimumSize(400, 300)
+        layout.addWidget(self.drawing_area)
+        
+        self.setLayout(layout)
+    
+    # メソッドの実装（省略）...
+```
+
+### 2. メインアプリケーションに統合する
+
+```python
+# メインアプリケーションにタブとして追加
+from image_annotator import ImageAnnotator
+
+# 詳細タブに追加
+self.annotator = ImageAnnotator()
+self.detail_tabs.addTab(self.annotator, "注釈")
+
+# 画像が選択されたときにアノテータを更新
+def on_thumbnail_selected(self, image_path):
+    # 既存のコード...
+    
+    # アノテータを更新
+    if hasattr(self, 'annotator'):
+        self.annotator.set_image(image_path)
+```
+
+## 設定の拡張
+
+新しい機能のための設定を追加するには：
+
+### 1. `settings_manager.py` のデフォルト設定に新しい項目を追加
+
+```python
+# 新しい設定セクションを追加
+self.default_settings["face_detection"] = {
+    "min_face_size": 30,
+    "scale_factor": 1.1,
+    "min_neighbors": 5,
+    "show_rectangles": True
+}
+```
+
+### 2. 設定ダイアログに新しいタブを追加
+
+```python
+def create_face_detection_tab(self):
+    """顔検出設定タブを作成"""
+    tab = QWidget()
+    layout = QFormLayout()
+    
+    # 最小顔サイズ
+    self.min_face_size_spin = QSpinBox()
+    self.min_face_size_spin.setRange(10, 100)
+    self.min_face_size_spin.setValue(self.settings["face_detection"]["min_face_size"])
+    layout.addRow("最小顔サイズ:", self.min_face_size_spin)
+    
+    # スケールファクター
+    self.scale_factor_spin = QDoubleSpinBox()
+    self.scale_factor_spin.setRange(1.01, 2.0)
+    self.scale_factor_spin.setSingleStep(0.01)
+    self.scale_factor_spin.setValue(self.settings["face_detection"]["scale_factor"])
+    layout.addRow("スケールファクター:", self.scale_factor_spin)
+    
+    # その他の設定項目...
+    
+    tab.setLayout(layout)
+    return tab
+
+# タブをダイアログに追加
+face_tab = self.create_face_detection_tab()
+self.tabs.addTab(face_tab, "顔検出")
+```
+
+### 3. 設定の読み込みと保存の処理を更新
+
+```python
+def apply_settings(self):
+    """設定を適用"""
+    # 既存のコード...
+    
+    # 顔検出設定
+    self.settings["face_detection"]["min_face_size"] = self.min_face_size_spin.value()
+    self.settings["face_detection"]["scale_factor"] = self.scale_factor_spin.value()
+    # その他の設定...
+```
+
+## 実装例
+
+### 新しい画像フィルタ機能の追加例
+
+以下は、画像にフィルタを適用する機能を追加する例です：
+
+#### 1. フィルタモジュールの作成 (`image_filters.py`)
+
+```python
+import cv2
+import numpy as np
+
+class ImageFilter:
+    """画像フィルタクラス"""
+    
+    @staticmethod
+    def apply_grayscale(image_path, output_path=None):
+        """グレースケールフィルタを適用"""
+        img = cv2.imread(str(image_path))
+        if img is None:
+            return None
+            
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+        # カラー画像に戻す（表示の一貫性のため）
+        result = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        
+        if output_path:
+            cv2.imwrite(str(output_path), result)
+            
+        return result
+    
+    @staticmethod
+    def apply_sepia(image_path, output_path=None):
+        """セピアフィルタを適用"""
+        img = cv2.imread(str(image_path))
+        if img is None:
+            return None
+            
+        # セピアエフェクトを作成
+        kernel = np.array([[0.272, 0.534, 0.131],
+                           [0.349, 0.686, 0.168],
+                           [0.393, 0.769, 0.189]])
+        
+        sepia = cv2.transform(img, kernel)
+        
+        if output_path:
+            cv2.imwrite(str(output_path), sepia)
+            
+        return sepia
+    
+    @staticmethod
+    def apply_edge_detection(image_path, output_path=None):
+        """エッジ検出フィルタを適用"""
+        img = cv2.imread(str(image_path))
+        if img is None:
+            return None
+            
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 100, 200)
+        
+        # カラー画像に戻す
+        result = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+        
+        if output_path:
+            cv2.imwrite(str(output_path), result)
+            
+        return result
+```
+
+#### 2. フィルタUIの作成 (`filter_widget.py`)
+
+```python
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
+                           QComboBox, QLabel, QFileDialog)
+from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtCore import Qt
+import cv2
+import numpy as np
+import os
+
+from image_filters import ImageFilter
+
+class FilterWidget(QWidget):
+    """画像フィルタウィジェット"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.current_image = None
+        self.filtered_image = None
+        self.initUI()
+    
+    def initUI(self):
+        layout = QVBoxLayout()
+        
+        # フィルタ選択
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(QLabel("フィルタ:"))
+        
+        self.filter_combo = QComboBox()
+        self.filter_combo.addItems(["グレースケール", "セピア", "エッジ検出"])
+        filter_layout.addWidget(self.filter_combo)
+        
+        self.apply_btn = QPushButton("適用")
+        self.apply_btn.clicked.connect(self.apply_filter)
+        filter_layout.addWidget(self.apply_btn)
+        
+        self.save_btn = QPushButton("保存...")
+        self.save_btn.clicked.connect(self.save_filtered_image)
+        self.save_btn.setEnabled(False)
+        filter_layout.addWidget(self.save_btn)
+        
+        layout.addLayout(filter_layout)
+        
+        # プレビュー
+        self.preview_label = QLabel()
+        self.preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_label.setMinimumSize(400, 300)
+        self.preview_label.setStyleSheet("background-color: #f0f0f0; border: 1px solid #ccc;")
+        layout.addWidget(self.preview_label)
+        
+        self.setLayout(layout)
+    
+    def set_image(self, image_path):
+        """画像を設定"""
+        self.current_image = image_path
+        self.filtered_image = None
+        self.save_btn.setEnabled(False)
+        
+        if image_path and os.path.exists(image_path):
+            pixmap = QPixmap(image_path)
+            scaled_pixmap = pixmap.scaled(
+                self.preview_label.width(), 
+                self.preview_label.height(),
+                Qt.KeepAspectRatio, 
+                Qt.SmoothTransformation
+            )
+            self.preview_label.setPixmap(scaled_pixmap)
+        else:
+            self.preview_label.clear()
+    
+    def apply_filter(self):
+        """選択されたフィルタを適用"""
+        if not self.current_image:
+            return
+        
+        filter_name = self.filter_combo.currentText()
+        
+        if filter_name == "グレースケール":
+            result = ImageFilter.apply_grayscale(self.current_image)
+        elif filter_name == "セピア":
+            result = ImageFilter.apply_sepia(self.current_image)
+        elif filter_name == "エッジ検出":
+            result = ImageFilter.apply_edge_detection(self.current_image)
+        else:
+            return
+        
+        if result is not None:
+            # OpenCV画像をQImageに変換
+            h, w, c = result.shape
+            qimg = QImage(result.data, w, h, w * c, QImage.Format_RGB888)
+            qimg = qimg.rgbSwapped()  # BGR to RGB
+            
+            pixmap = QPixmap.fromImage(qimg)
+            scaled_pixmap = pixmap.scaled(
+                self.preview_label.width(), 
+                self.preview_label.height(),
+                Qt.KeepAspectRatio, 
+                Qt.SmoothTransformation
+            )
+            self.preview_label.setPixmap(scaled_pixmap)
+            
+            self.filtered_image = result
+            self.save_btn.setEnabled(True)
+    
+    def save_filtered_image(self):
+        """フィルタ適用した画像を保存"""
+        if self.filtered_image is None:
+            return
+            
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, 
+            "フィルタ適用画像を保存", 
+            os.path.dirname(self.current_image),
+            "画像ファイル (*.jpg *.jpeg *.png)"
+        )
+        
+        if file_path:
+            cv2.imwrite(file_path, self.filtered_image)
+```
+
+#### 3. メインアプリケーションに機能を統合
+
+```python
+# main_application.py
+
+from filter_widget import FilterWidget
+
+# 詳細タブに追加
+self.filter_widget = FilterWidget()
+self.detail_tabs.addTab(self.filter_widget, "フィルタ")
+
+# 画像が選択されたときにフィルタウィジェットを更新
+def on_thumbnail_selected(self, image_path):
+    # 既存のコード...
+    
+    # フィルタウィジェットを更新
+    if hasattr(self, 'filter_widget'):
+        self.filter_widget.set_image(image_path)
+```
+
+このような方法で、様々な機能を追加することができます。モジュール化された設計により、既存のコードに影響を与えることなく、新機能を追加できます。

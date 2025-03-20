@@ -1,0 +1,106 @@
+# 画像クリーンアップシステム - インストール手順
+
+このドキュメントでは、画像クリーンアップシステムのインストール方法と実行方法について説明します。
+
+## 前提条件
+
+以下のソフトウェアが必要です：
+
+- Python 3.7以上
+- pip（Pythonパッケージマネージャー）
+
+## 手順1: 必要なライブラリのインストール
+
+以下のコマンドを実行して、必要なライブラリをインストールします。
+
+```bash
+pip install opencv-python pillow imagehash numpy PyQt5 piexif
+```
+
+もしくは、`requirements.txt`を使用する場合：
+
+```bash
+pip install -r requirements.txt
+```
+
+## 手順2: ファイルの配置
+
+全てのPythonファイルを同じディレクトリに配置します。ファイル構造は次のようになります：
+
+```
+image_cleanup_system/
+├── main_application.py       # メインアプリケーション
+├── image_cleanup_system.py   # 基本の画像クリーンアップシステム
+├── thumbnail_view.py         # サムネイル表示機能
+├── exif_display.py           # EXIF情報表示機能
+├── ai_quality_assessment.py  # AI画質評価機能
+├── batch_processor.py        # バッチ処理機能
+├── drag_drop_support.py      # ドラッグ&ドロップ対応
+├── image_zoom_widget.py      # 画像拡大/縮小機能
+├── settings_manager.py       # 設定保存機能
+└── requirements.txt          # 依存ライブラリリスト
+```
+
+## 手順3: アプリケーションの実行
+
+以下のコマンドでアプリケーションを起動します：
+
+```bash
+python main_application.py
+```
+
+## トラブルシューティング
+
+### OpenCV関連のエラー
+
+エラーメッセージ:
+```
+ImportError: DLL load failed: 指定されたモジュールが見つかりません。
+```
+
+解決策:
+```bash
+pip uninstall opencv-python
+pip install opencv-python-headless
+```
+
+### PyQt5関連のエラー
+
+エラーメッセージ:
+```
+ModuleNotFoundError: No module named 'PyQt5.sip'
+```
+
+解決策:
+```bash
+pip install pyqt5-sip
+```
+
+### その他の依存関係エラー
+
+他の依存関係エラーが発生した場合は、以下のコマンドで個別にインストールしてください：
+
+```bash
+pip install [エラーに表示されているパッケージ名]
+```
+
+## 開発環境での実行
+
+開発環境では、モジュールのインポートエラーを避けるために、以下のように実行することもできます：
+
+```bash
+cd image_cleanup_system
+PYTHONPATH=. python main_application.py
+```
+
+Windows環境では：
+
+```cmd
+cd image_cleanup_system
+set PYTHONPATH=.
+python main_application.py
+```
+
+## ライセンス
+
+このソフトウェアはMITライセンスの下で配布されています。詳細はLICENSEファイルをご覧ください。
