@@ -31,11 +31,7 @@ class MainApplication(QMainWindow):
         self.initUI()
         self.loadSettings()
         self.setup_drag_drop()
-        self.thumbnail_view = ThumbnailGridView(
-        thumbnail_size=self.settings['ui']['thumbnail_size'],
-        columns=self.settings['ui']['grid_columns']
-    )
-        
+    
     def initUI(self):
         self.setWindowTitle(self.title)
         
@@ -43,6 +39,12 @@ class MainApplication(QMainWindow):
         width = self.settings['ui']['window_width']
         height = self.settings['ui']['window_height']
         self.resize(width, height)
+        
+        # 最初にサムネイルビューを作成
+        self.thumbnail_view = ThumbnailGridView(
+            thumbnail_size=self.settings['ui']['thumbnail_size'],
+            columns=self.settings['ui']['grid_columns']
+        )
         
         # メニューバーの設定
         self.create_menu_bar()
@@ -66,7 +68,6 @@ class MainApplication(QMainWindow):
         self.splitter = QSplitter(Qt.Horizontal)
         
         # 左側：サムネイルビュー
-        self.thumbnail_view = ThumbnailGridView()
         self.thumbnail_view.item_selected.connect(self.on_thumbnail_selected)
         self.thumbnail_view.item_checkbox_toggled.connect(self.on_thumbnail_checkbox_toggled)
         self.splitter.addWidget(self.thumbnail_view)
@@ -96,7 +97,7 @@ class MainApplication(QMainWindow):
         self.splitter.addWidget(right_widget)
         
         # スプリッターの初期サイズ比率を設定
-        self.splitter.setSizes([width * 0.4, width * 0.6])
+        self.splitter.setSizes([int(width * 0.4), int(width * 0.6)])
         
         main_layout.addWidget(self.splitter)
         
