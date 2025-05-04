@@ -1,0 +1,71 @@
+# pyproject.toml
+[build-system]
+requires = ["setuptools>=61.0"] # ビルドシステムの要件
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "image_cleaner"
+version = "0.1.0" # プロジェクトのバージョン (適宜更新)
+description = "指定されたフォルダ内のブレ画像や類似画像を検出し、整理するためのGUIアプリケーション。"
+readme = "README.md"
+requires-python = ">=3.8" # Python 3.8 以上が必要
+license = { text = "MIT License" } # プロジェクトのライセンス (例: MIT)
+authors = [
+    { name = "Your Name", email = "you@example.com" }, # ★ あなたの名前に変更 ★
+]
+classifiers = [ # PyPI分類子 (任意)
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Environment :: Win32 (MS Windows)", # 主なターゲットOS
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: Multimedia :: Graphics :: Viewers",
+    "Topic :: Utilities",
+]
+keywords = ["image", "cleaner", "duplicate", "similar", "blur", "gui", "pyside"] # 検索用キーワード (任意)
+
+# --- 主要な依存関係 ---
+dependencies = [
+    # PySide6 (バージョン指定子は requirements.txt に合わせるか、互換性のある範囲で指定)
+    "PySide6 ~= 6.9.0",
+    "PySide6-Addons ~= 6.9.0",
+    "PySide6-Essentials ~= 6.9.0",
+    # 画像処理関連
+    "opencv-python ~= 4.11.0", # または >=4.11.0,<5.0.0 など
+    "Pillow ~= 11.2.1",
+    "pillow-heif >= 0.15", # HEIC/HEIF対応 (バージョンは適宜調整)
+    "imagehash ~= 4.3.1", # Pillow 10 以降との互換性考慮
+    # その他ユーティリティ
+    "Send2Trash ~= 1.8.3",
+    "numpy >= 1.20, < 2.3", # numpy 2.2.5 は scipy 1.15.2 と互換性がない可能性があるので範囲指定
+    "scipy ~= 1.15.2", # numpy との互換性注意
+    "PyWavelets ~= 1.8.0", # imagehash が依存
+    "packaging", # imagehash が依存する可能性
+    # Windows 特有の依存関係 (send2trash が依存)
+    "pywin32-ctypes ~= 0.2.3; sys_platform == 'win32'",
+]
+
+[project.urls] # 任意: プロジェクト関連URL
+"Homepage" = "https://github.com/your_username/image_remover" # ★ あなたのリポジトリURLに変更 ★
+# "Bug Tracker" = "https://github.com/your_username/image_remover/issues"
+
+# --- オプションの依存関係 (開発用、ビルド用など) ---
+[project.optional-dependencies]
+build = [
+    "pyinstaller ~= 6.13.0",
+    "pyinstaller-hooks-contrib ~= 2025.4",
+    "pefile ~= 2023.2.7; sys_platform == 'win32'", # pyinstaller が依存
+    "altgraph ~= 0.17.4", # pyinstaller が依存
+]
+dev = [
+    "pytest", # テスト用 (今後追加する場合)
+    "flake8", # リンター (任意)
+    "mypy",   # 型チェッカー (任意)
+]
+
+[project.gui-scripts] # GUIアプリのエントリーポイント
+image-cleaner = "main:main" # `main.py` の `main` 関数を実行 (main.py に main 関数が必要)
+# もしくは `main:run_app` など、起動用の関数名に合わせる
+# 現在の main.py は直接実行する形式なので、このセクションは必須ではないが、
+# 将来的に setuptools でインストール可能にする場合に便利
+

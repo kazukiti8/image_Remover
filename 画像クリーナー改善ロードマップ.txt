@@ -1,0 +1,24 @@
+﻿画像クリーナー 改善ロードマップ
+9. ロギング
+   * プロジェクト全体で print 文を Python 標準の logging モジュールに置き換えます。
+   * main.py または gui/main_window.py でロガーを設定します（ログレベル、フォーマット、出力先（コンソール、ファイル））。
+   * エラー発生時には logging.exception() を使用してスタックトレースを記録します。
+11. エラーハンドリングの詳細化
+   * 各ファイルの読み込み、計算、UI操作に関連する try...except ブロックを見直します。
+   * FileNotFoundError, PermissionError, MemoryError, cv2.error, PIL.UnidentifiedImageError など、具体的な例外を捕捉し、より分かりやすいエラーメッセージを QMessageBox やステータスバーに表示します。
+   * 重要なエラーはログに詳細情報（スタックトレース含む）を記録します。
+12. プログレス表示の詳細化
+   * gui/workers.py の WorkerSignals に、現在処理中のファイル名や処理ステージを示すシグナルを追加します（例: current_file_update = Signal(str)）。
+   * ScanWorker が適切なタイミングでこの新しいシグナルを発行するように変更します。
+   * gui/main_window.py に、この情報を受け取って表示するための QLabel を追加するか、既存の status_label のテキストを更新するようにします。
+13. 設定のプリセット
+   * gui/dialogs/settings_dialog.py に、「プリセットを保存」「プリセットを読み込み」ボタンと、プリセット名を入力/選択するUIを追加します。
+   * utils/config_handler.py を変更し、メインの設定ファイル (.image_cleaner_settings.json) 内にプリセット情報を保存・読み込みする機能を追加します。
+14. テーマ/外観のカスタマイズ
+   * Qt StyleSheet (.qss) ファイルを作成し、ライトテーマ用とダークテーマ用のスタイルを定義します。
+   * gui/main_window.py または main.py で、アプリケーション起動時にデフォルトテーマを適用するロジックを追加します。
+   * 設定ダイアログまたはメニューバーにテーマ切り替えオプションを追加し、選択に応じて QApplication.instance().setStyleSheet() などでスタイルシートを動的に切り替える機能を追加します。
+
+
+
+   https://github.com/kazukiti8/image_Remover.git

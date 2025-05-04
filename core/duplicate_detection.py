@@ -2,24 +2,30 @@
 import os
 import hashlib
 import time
-from typing import Tuple, Optional, List, Dict, Any, Set, Callable # ★ Callable をインポート ★
+from typing import Tuple, Optional, List, Dict, Any, Set, Callable
+
+# ★ CacheHandler をインポート ★
+try:
+    from utils.cache_handler import CacheHandler
+except ImportError:
+    print("警告: utils.cache_handler のインポートに失敗しました。キャッシュ機能は無効になります。")
+    CacheHandler = None
 
 # 型エイリアス
 ErrorDict = Dict[str, str]
 DuplicateDict = Dict[str, List[str]]
 FindDuplicateResult = Tuple[DuplicateDict, List[ErrorDict]]
 
-# WorkerSignals は削除済み
-
+# ★ 関数シグネチャに cache_handler を追加 ★
 def find_duplicate_files(image_paths: List[str],
-                          file_extensions: Optional[Tuple[str, ...]] = None,
                           signals: Optional[Any] = None,
                           progress_offset: int = 0,
                           progress_range: int = 100,
-                          is_cancelled_func: Optional[Callable[[], bool]] = None) -> FindDuplicateResult: # ★ is_cancelled_func を追加 ★
+                          is_cancelled_func: Optional[Callable[[], bool]] = None,
+                          cache_handler: Optional[CacheHandler] = None) -> FindDuplicateResult:
     """
     指定されたファイルパスリスト内で完全に同一内容のファイルを見つけます。
-    中断チェックに対応。
+    MD5ハッシュのキャッシュを利用します。中断チェックに対応。
     """
     errors: List[ErrorDict] = []
     duplicates: DuplicateDict = {}
@@ -35,17 +41,14 @@ def find_duplicate_files(image_paths: List[str],
            (current_value == total_value or current_time - last_progress_emit_time > 0.1):
              signals.progress_update.emit(progress); signals.status_update.emit(status); last_progress_emit_time = current_time
 
-    # --- 1. ファイルサイズでグループ化 ---
+    # --- 1. ファイルサイズでグループ化 (変更なし) ---
     num_files: int = len(image_paths)
     status_prefix_scan: str = "ファイルサイズ取得中"
     emit_progress(0, num_files, progress_offset, progress_range * 0.2, status_prefix_scan)
-
     processed_files_count: int = 0
     file_path: str
     for file_path in image_paths:
-        # ★ 中断チェック ★
-        if is_cancelled_func and is_cancelled_func(): return {}, errors # 中断時は空の結果とエラーを返す
-
+        if is_cancelled_func and is_cancelled_func(): return {}, errors
         try:
             if os.path.isfile(file_path):
                 file_size: int = os.path.getsize(file_path)
@@ -56,7 +59,6 @@ def find_duplicate_files(image_paths: List[str],
         except Exception as e: errors.append({'type': 'ファイルサイズ取得(予期せぬ)', 'path': file_path, 'error': str(e)})
         processed_files_count += 1
         emit_progress(processed_files_count, num_files, progress_offset, progress_range * 0.2, status_prefix_scan)
-
     print(f"{num_files} 個のファイルを検出。重複チェックを開始します...")
 
     # --- 2. ハッシュ計算と重複検出 ---
@@ -74,32 +76,58 @@ def find_duplicate_files(image_paths: List[str],
             if size not in hashes_by_size: hashes_by_size[size] = {}
             file_path: str
             for file_path in paths:
-                # ★ 中断チェック ★
-                if is_cancelled_func and is_cancelled_func(): return {}, errors
+                if is_cancelled_func and is_cancelled_func():
+                    # ★ 中断時にもキャッシュを保存する ★
+                    if cache_handler: cache_handler.save_all()
+                    return {}, errors
 
-                try:
-                    hasher = hashlib.md5()
-                    with open(file_path, 'rb') as file:
-                        while True:
-                            # ★ 中断チェック (ファイル読み込み中) ★
-                            if is_cancelled_func and is_cancelled_func(): raise InterruptedError("ハッシュ計算中に中断")
-                            chunk: bytes = file.read(8192)
-                            if not chunk: break
-                            hasher.update(chunk)
-                    file_hash: str = hasher.hexdigest()
+                file_hash: Optional[str] = None
+                error_calculating = False
+
+                # ★★★ キャッシュチェック ★★★
+                if cache_handler:
+                    cached_hash = cache_handler.get('md5', file_path)
+                    if cached_hash is not None:
+                        file_hash = str(cached_hash) # キャッシュ値を使用
+                        # print(f"キャッシュヒット(MD5): {os.path.basename(file_path)}") # デバッグ用
+                    # else:
+                        # print(f"キャッシュミス(MD5): {os.path.basename(file_path)}") # デバッグ用
+
+                # ★★★ キャッシュがない場合のみ計算 ★★★
+                if file_hash is None:
+                    try:
+                        hasher = hashlib.md5()
+                        with open(file_path, 'rb') as file:
+                            while True:
+                                if is_cancelled_func and is_cancelled_func(): raise InterruptedError("ハッシュ計算中に中断")
+                                chunk: bytes = file.read(8192)
+                                if not chunk: break
+                                hasher.update(chunk)
+                        file_hash = hasher.hexdigest()
+                        # ★ 計算結果をキャッシュに保存 ★
+                        if cache_handler:
+                            cache_handler.put('md5', file_path, file_hash)
+                    except InterruptedError:
+                         print(f"ハッシュ計算が中断されました: {file_path}")
+                         if cache_handler: cache_handler.save_all() # 中断時も保存
+                         return {}, errors
+                    except OSError as e:
+                        errors.append({'type': 'ファイル読込/ハッシュ計算', 'path': file_path, 'error': str(e)})
+                        error_calculating = True
+                    except Exception as e:
+                        errors.append({'type': 'ハッシュ計算(予期せぬ)', 'path': file_path, 'error': str(e)})
+                        error_calculating = True
+                # ★★★★★★★★★★★★★★★★★★★★★
+
+                # ハッシュが取得できた場合のみ辞書に追加
+                if file_hash and not error_calculating:
                     if file_hash not in hashes_by_size[size]: hashes_by_size[size][file_hash] = []
                     hashes_by_size[size][file_hash].append(file_path)
-                except InterruptedError: # ★ 中断例外をキャッチ ★
-                     print(f"ハッシュ計算が中断されました: {file_path}")
-                     return {}, errors # 中断時はエラーリストだけ返す
-                except OSError as e: errors.append({'type': 'ファイル読込/ハッシュ計算', 'path': file_path, 'error': str(e)})
-                except Exception as e: errors.append({'type': 'ハッシュ計算(予期せぬ)', 'path': file_path, 'error': str(e)})
 
                 hashed_files_count += 1
-                # 進捗は中断チェック後に行う
                 emit_progress(hashed_files_count, files_to_hash_count, hash_offset, hash_range, status_prefix_hash)
 
-    # --- 3. 重複リスト作成 ---
+    # --- 3. 重複リスト作成 (変更なし) ---
     size: int; hashes: Dict[str, List[str]]
     for size, hashes in hashes_by_size.items():
         file_hash: str; file_list: List[str]
@@ -109,4 +137,10 @@ def find_duplicate_files(image_paths: List[str],
 
     print(f"重複チェック完了。{len(duplicates)} グループの重複ファイルが見つかりました。")
     emit_progress(files_to_hash_count, files_to_hash_count, hash_offset, hash_range, status_prefix_hash)
+
+    # ★ 処理完了後にキャッシュを保存 ★
+    if cache_handler:
+        cache_handler.save_all()
+
     return duplicates, errors
+

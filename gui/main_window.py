@@ -21,12 +21,14 @@ ErrorDict = Dict[str, str]
 ResultsData = Dict[str, Union[List[BlurResultItem], List[SimilarPair], DuplicateDict, List[ErrorDict]]]
 LoadResult = Tuple[Optional[ResultsData], Optional[str], Optional[SettingsDict], Optional[str]]
 DeleteResult = Tuple[int, List[ErrorDict], Set[str]]
+ScanStateData = Dict[str, Any] # ★ 追加 ★
+LoadStateResult = Tuple[Optional[ScanStateData], Optional[str]] # ★ 追加 ★
 
-# --- ウィジェット、ワーカー、ダイアログをインポート ---
+# --- ウィジェット、ワーカー、ダイアログをインポート (変更なし) ---
 try:
     from .widgets.preview_widget import PreviewWidget
     from .widgets.results_tabs_widget import ResultsTabsWidget
-    from .workers import ScanWorker, WorkerSignals # ScanWorker をインポート
+    from .workers import ScanWorker, WorkerSignals
     from .dialogs.settings_dialog import SettingsDialog
 except ImportError as e: print(f"エラー: GUIコンポーネントのインポートに失敗 ({e})"); import traceback; traceback.print_exc(); sys.exit(1)
 
@@ -34,7 +36,8 @@ except ImportError as e: print(f"エラー: GUIコンポーネントのインポ
 try:
     from utils.config_handler import load_settings, save_settings
     from utils.file_operations import delete_files_to_trash, open_file_external
-    from utils.results_handler import save_results_to_file, load_results_from_file
+    # ★ 状態管理関数もインポート ★
+    from utils.results_handler import save_results_to_file, load_results_from_file, load_scan_state, delete_scan_state, get_state_filepath
 except ImportError as e:
     print(f"エラー: ユーティリティモジュールのインポートに失敗 ({e})")
     def load_settings() -> SettingsDict: return {'last_directory': os.path.expanduser("~")}
@@ -43,6 +46,10 @@ except ImportError as e:
     def open_file_external(fp: str, p: Optional[QWidget] = None) -> None: print("警告: ファイルを開く機能が無効")
     def save_results_to_file(fp: str, res: ResultsData, sdir: str, sets: Optional[SettingsDict] = None) -> bool: print("警告: 結果保存機能が無効"); return False
     def load_results_from_file(fp: str) -> LoadResult: print("警告: 結果読込機能が無効"); return None, None, None, "結果読込機能が無効です"
+    # ★ ダミーの状態管理関数 ★
+    def load_scan_state(dir_path: str) -> LoadStateResult: print("警告: 状態読み込み機能が無効"); return None, "状態読み込み機能が無効です"
+    def delete_scan_state(dir_path: str) -> bool: print("警告: 状態削除機能が無効"); return False
+    def get_state_filepath(dir_path: str) -> str: return os.path.join(dir_path, ".image_cleaner_scan_state.json")
 
 
 class ImageCleanerWindow(QMainWindow):
@@ -53,83 +60,134 @@ class ImageCleanerWindow(QMainWindow):
         self.setGeometry(100, 100, 1000, 750)
         self.threadpool: QThreadPool = QThreadPool()
         self.current_settings: SettingsDict = load_settings()
-        # UI要素の型ヒント
+        # UI要素の型ヒント (変更なし)
         self.dir_label: QLabel; self.dir_path_edit: QLineEdit; self.select_dir_button: QPushButton
         self.settings_button: QPushButton; self.save_results_button: QPushButton; self.load_results_button: QPushButton
-        self.scan_button: QPushButton; self.cancel_button: QPushButton # ★ 中止ボタン追加 ★
+        self.scan_button: QPushButton; self.cancel_button: QPushButton
         self.status_label: QLabel; self.progress_bar: QProgressBar
         self.preview_widget: PreviewWidget; self.results_tabs_widget: ResultsTabsWidget
         self.delete_button: QPushButton; self.select_all_blurry_button: QPushButton; self.select_all_similar_button: QPushButton; self.select_all_duplicates_button: QPushButton; self.deselect_all_button: QPushButton
-        # ★ 実行中のワーカーへの参照 ★
         self.current_worker: Optional[ScanWorker] = None
+        self.results_saved: bool = True
 
         self._setup_ui()
         self._connect_signals()
-        self.results_saved: bool = True
 
     def _setup_ui(self) -> None:
+        # UIセットアップは変更なし
         main_widget = QWidget(); self.setCentralWidget(main_widget); main_layout = QVBoxLayout(main_widget); main_layout.setContentsMargins(10, 10, 10, 10)
         input_layout = QHBoxLayout(); self.dir_label = QLabel("対象フォルダ:"); self.dir_path_edit = QLineEdit(); self.dir_path_edit.setReadOnly(True); self.select_dir_button = QPushButton("フォルダを選択..."); input_layout.addWidget(self.dir_label); input_layout.addWidget(self.dir_path_edit, 1); input_layout.addWidget(self.select_dir_button); main_layout.addLayout(input_layout); main_layout.addSpacing(5)
         config_layout = QHBoxLayout(); self.settings_button = QPushButton("設定..."); self.save_results_button = QPushButton("結果を保存..."); self.load_results_button = QPushButton("結果を読み込み..."); config_layout.addWidget(self.settings_button); config_layout.addWidget(self.save_results_button); config_layout.addWidget(self.load_results_button); config_layout.addStretch(); main_layout.addLayout(config_layout); main_layout.addSpacing(10)
-        # --- スキャン実行エリア (中止ボタン追加) ---
-        proc_layout = QHBoxLayout()
-        self.scan_button = QPushButton("スキャン開始")
-        self.cancel_button = QPushButton("中止") # ★ 中止ボタン作成 ★
-        self.cancel_button.setVisible(False) # ★ 初期状態は非表示 ★
-        self.status_label = QLabel("ステータス: 待機中"); self.status_label.setWordWrap(True)
-        proc_layout.addWidget(self.scan_button)
-        proc_layout.addWidget(self.cancel_button) # ★ 中止ボタンを追加 ★
-        proc_layout.addWidget(self.status_label, 1)
-        main_layout.addLayout(proc_layout)
+        proc_layout = QHBoxLayout(); self.scan_button = QPushButton("スキャン開始"); self.cancel_button = QPushButton("中止"); self.cancel_button.setVisible(False); self.status_label = QLabel("ステータス: 待機中"); self.status_label.setWordWrap(True); proc_layout.addWidget(self.scan_button); proc_layout.addWidget(self.cancel_button); proc_layout.addWidget(self.status_label, 1); main_layout.addLayout(proc_layout)
         self.progress_bar = QProgressBar(); self.progress_bar.setVisible(False); self.progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter); main_layout.addWidget(self.progress_bar); main_layout.addSpacing(10)
-        # --- (プレビュー、結果タブ、アクションボタンは変更なし) ---
         self.preview_widget = PreviewWidget(self); preview_frame = QFrame(); preview_frame.setFrameShape(QFrame.Shape.StyledPanel); preview_frame_layout = QVBoxLayout(preview_frame); preview_frame_layout.setContentsMargins(0,0,0,0); preview_frame_layout.addWidget(self.preview_widget); preview_frame.setFixedHeight(250); main_layout.addWidget(preview_frame, stretch=0); main_layout.addSpacing(10)
         self.results_tabs_widget = ResultsTabsWidget(self); main_layout.addWidget(self.results_tabs_widget, stretch=1); main_layout.addSpacing(10)
         action_layout = QHBoxLayout(); self.delete_button = QPushButton("選択した項目をゴミ箱へ移動"); self.delete_button.setToolTip("現在表示中のタブで選択/チェックされた項目を削除します。\n(重複タブではチェックされたもののみ)"); self.select_all_blurry_button = QPushButton("全選択(ブレ)"); self.select_all_similar_button = QPushButton("全選択(類似ペア)"); self.select_all_duplicates_button = QPushButton("全選択(重複, 除く先頭)"); self.deselect_all_button = QPushButton("全選択解除"); action_layout.addWidget(self.delete_button); action_layout.addStretch(); action_layout.addWidget(self.select_all_blurry_button); action_layout.addWidget(self.select_all_similar_button); action_layout.addWidget(self.select_all_duplicates_button); action_layout.addWidget(self.deselect_all_button); main_layout.addLayout(action_layout)
         self._set_scan_controls_enabled(False); self._set_action_buttons_enabled(False); self.save_results_button.setEnabled(False); self.load_results_button.setEnabled(True)
 
+
     def _connect_signals(self) -> None:
-        self.select_dir_button.clicked.connect(self.select_directory); self.settings_button.clicked.connect(self.open_settings); self.scan_button.clicked.connect(self.start_scan)
-        # ★ 中止ボタンのシグナル接続 ★
+        # シグナル接続は変更なし
+        self.select_dir_button.clicked.connect(self.select_directory)
+        self.settings_button.clicked.connect(self.open_settings)
+        self.scan_button.clicked.connect(self.start_scan)
         self.cancel_button.clicked.connect(self.request_scan_cancellation)
-        self.save_results_button.clicked.connect(self.save_results); self.load_results_button.clicked.connect(self.load_results); self.delete_button.clicked.connect(self.delete_selected_items)
-        self.select_all_blurry_button.clicked.connect(self.results_tabs_widget.select_all_blurry); self.select_all_similar_button.clicked.connect(self.results_tabs_widget.select_all_similar); self.select_all_duplicates_button.clicked.connect(self.results_tabs_widget.select_all_duplicates); self.deselect_all_button.clicked.connect(self.results_tabs_widget.deselect_all)
+        self.save_results_button.clicked.connect(self.save_results)
+        self.load_results_button.clicked.connect(self.load_results)
+        self.delete_button.clicked.connect(self.delete_selected_items)
+        self.select_all_blurry_button.clicked.connect(self.results_tabs_widget.select_all_blurry)
+        self.select_all_similar_button.clicked.connect(self.results_tabs_widget.select_all_similar)
+        self.select_all_duplicates_button.clicked.connect(self.results_tabs_widget.select_all_duplicates)
+        self.deselect_all_button.clicked.connect(self.results_tabs_widget.deselect_all)
         self.results_tabs_widget.selection_changed.connect(self.update_preview_display)
-        self.preview_widget.left_preview_clicked.connect(self._delete_single_file_from_preview); self.preview_widget.right_preview_clicked.connect(self._delete_single_file_from_preview)
-        self.results_tabs_widget.delete_file_requested.connect(self._handle_delete_request); self.results_tabs_widget.open_file_requested.connect(self._handle_open_request); self.results_tabs_widget.delete_duplicates_requested.connect(self._handle_delete_duplicates_request)
+        self.preview_widget.left_preview_clicked.connect(self._delete_single_file_from_preview)
+        self.preview_widget.right_preview_clicked.connect(self._delete_single_file_from_preview)
+        self.results_tabs_widget.delete_file_requested.connect(self._handle_delete_request)
+        self.results_tabs_widget.open_file_requested.connect(self._handle_open_request)
+        self.results_tabs_widget.delete_duplicates_requested.connect(self._handle_delete_duplicates_request)
 
     # --- スロット関数 ---
     @Slot()
     def select_directory(self) -> None:
-        last_dir: str = str(self.current_settings.get('last_directory', os.path.expanduser("~"))); dir_path: str = QFileDialog.getExistingDirectory(self, "フォルダを選択", last_dir)
-        if dir_path: self.dir_path_edit.setText(dir_path); self.current_settings['last_directory'] = dir_path; self._clear_all_results(); self.status_label.setText("ステータス: フォルダを選択しました。スキャンまたは結果の読み込みを行ってください。"); self._update_ui_state(scan_enabled=True, actions_enabled=False, cancel_enabled=False) # UI状態更新
+        last_dir: str = str(self.current_settings.get('last_directory', os.path.expanduser("~")))
+        dir_path: str = QFileDialog.getExistingDirectory(self, "フォルダを選択", last_dir)
+        if dir_path:
+            # ★★★ 中断状態のチェック ★★★
+            state_filepath = get_state_filepath(dir_path)
+            resume_state: Optional[ScanStateData] = None
+            if os.path.exists(state_filepath):
+                reply = QMessageBox.question(self, "中断されたスキャン",
+                                             f"選択されたフォルダには中断されたスキャンデータが見つかりました。\n({os.path.basename(state_filepath)})\n\nこのスキャンを再開しますか？\n\n"
+                                             f"「はい」で再開、「いいえ」で新規スキャン（中断データ削除）、「キャンセル」でフォルダ選択を取り消します。",
+                                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                                             QMessageBox.StandardButton.Yes)
+
+                if reply == QMessageBox.StandardButton.Yes:
+                    loaded_state, error_msg = load_scan_state(dir_path)
+                    if error_msg:
+                        QMessageBox.warning(self, "状態読み込みエラー", f"中断データの読み込みに失敗しました:\n{error_msg}\n新規スキャンを開始します。")
+                        delete_scan_state(dir_path) # 破損している可能性があるので削除
+                    else:
+                        resume_state = loaded_state
+                        print("スキャン再開を選択しました。")
+                elif reply == QMessageBox.StandardButton.No:
+                    print("新規スキャンを選択しました。中断データを削除します。")
+                    delete_scan_state(dir_path)
+                else: # Cancel
+                    print("フォルダ選択をキャンセルしました。")
+                    return # フォルダ選択自体をキャンセル
+            # ★★★★★★★★★★★★★★★★★★★
+
+            self.dir_path_edit.setText(dir_path)
+            self.current_settings['last_directory'] = dir_path
+            self._clear_all_results()
+            self._update_ui_state(scan_enabled=True, actions_enabled=False, cancel_enabled=False)
+
+            if resume_state:
+                # 再開する場合は、すぐにスキャン開始
+                self.status_label.setText("ステータス: 中断されたスキャンを再開します...")
+                self.start_scan(initial_state=resume_state) # ★ 再開状態を渡す ★
+            else:
+                # 新規スキャンの場合はメッセージ表示のみ
+                self.status_label.setText("ステータス: フォルダを選択しました。スキャンまたは結果の読み込みを行ってください。")
 
     @Slot()
     def open_settings(self) -> None:
+        # 変更なし
         if SettingsDialog is None: QMessageBox.warning(self, "エラー", "設定ダイアログモジュールが見つかりません。"); return
-        dialog = SettingsDialog(self.current_settings, self);
+        dialog = SettingsDialog(self.current_settings, self)
         if dialog.exec(): self.current_settings = dialog.get_settings(); print("設定が更新されました:", self.current_settings)
         else: print("設定はキャンセルされました。")
 
+    # ★ start_scan に initial_state パラメータを追加 ★
     @Slot()
-    def start_scan(self) -> None:
+    def start_scan(self, initial_state: Optional[ScanStateData] = None) -> None:
         selected_dir: str = self.dir_path_edit.text()
         if not self._validate_directory(selected_dir): return
-        if not self._confirm_unsaved_results("新しいスキャンを開始"): return
 
-        self._clear_all_results()
-        self.status_label.setText(f"ステータス: スキャン準備中... ({os.path.basename(selected_dir)})")
+        # 新規スキャン開始時のみ、未保存の結果を確認
+        if initial_state is None and not self._confirm_unsaved_results("新しいスキャンを開始"): return
+
+        # ★ 新規スキャンの場合は、念のため既存の状態ファイルを削除 ★
+        if initial_state is None:
+            delete_scan_state(selected_dir)
+
+        self._clear_all_results() # UIの結果表示はクリア
+        status_msg = f"ステータス: スキャン準備中... ({os.path.basename(selected_dir)})"
+        if initial_state:
+            status_msg = f"ステータス: スキャン再開中... ({os.path.basename(selected_dir)})"
+        self.status_label.setText(status_msg)
         self._set_progress_bar_visible(True)
-        self._update_ui_state(scan_enabled=False, actions_enabled=False, cancel_enabled=True) # ★ 中止ボタン有効化 ★
+        self._update_ui_state(scan_enabled=False, actions_enabled=False, cancel_enabled=True)
 
-        # ★ ワーカーインスタンスを保持 ★
-        self.current_worker = ScanWorker(selected_dir, self.current_settings)
+        # ★ ワーカーに initial_state を渡す ★
+        self.current_worker = ScanWorker(selected_dir, self.current_settings, initial_state=initial_state)
+        # シグナル接続 (変更なし)
         self.current_worker.signals.status_update.connect(self.update_status)
         self.current_worker.signals.progress_update.connect(self.update_progress_bar)
         self.current_worker.signals.results_ready.connect(self.populate_results_and_update_state)
         self.current_worker.signals.error.connect(self.handle_scan_error)
         self.current_worker.signals.finished.connect(self.handle_scan_finished)
-        # ★ 中止シグナルを接続 ★
         self.current_worker.signals.cancelled.connect(self.handle_scan_cancelled)
         self.threadpool.start(self.current_worker)
 
@@ -138,7 +196,8 @@ class ImageCleanerWindow(QMainWindow):
         """中止ボタンがクリックされたときの処理"""
         if self.current_worker:
             self.status_label.setText("ステータス: 中止処理中...")
-            self.cancel_button.setEnabled(False) # 中止ボタンを無効化
+            self.cancel_button.setEnabled(False)
+            # ★ ワーカーに中止を要求 (状態保存はワーカー内で行う) ★
             self.current_worker.request_cancellation()
         else:
             print("警告: 中止対象のワーカースレッドが見つかりません。")
@@ -149,21 +208,30 @@ class ImageCleanerWindow(QMainWindow):
     def update_progress_bar(self, value: int) -> None: self.progress_bar.setValue(value)
     @Slot(list, list, dict, list)
     def populate_results_and_update_state(self, blurry: List[BlurResultItem], similar: List[SimilarPair], duplicates: DuplicateDict, errors: List[ErrorDict]) -> None:
+        # 変更なし
         self.results_tabs_widget.populate_results(blurry, similar, duplicates, errors); has_results: bool = bool(blurry or similar or duplicates); self._update_ui_state(scan_enabled=True, actions_enabled=has_results, cancel_enabled=False); self.results_saved = False
-        self.current_worker = None # 処理完了したので参照をクリア
+        self.current_worker = None
 
     @Slot(str)
     def handle_scan_error(self, message: str) -> None:
+        # 変更なし
         print(f"致命的エラー受信: {message}"); QMessageBox.critical(self, "スキャンエラー", f"処理中に致命的なエラーが発生しました:\n{message}"); self.status_label.setText(f"ステータス: 致命的エラー ({message})"); self._set_progress_bar_visible(False); self._update_ui_state(scan_enabled=bool(self.dir_path_edit.text()), actions_enabled=False, cancel_enabled=False)
-        self.current_worker = None # 処理完了したので参照をクリア
+        # ★ エラー時も状態ファイルを削除するか検討 (ここでは削除しない) ★
+        # delete_scan_state(self.dir_path_edit.text())
+        self.current_worker = None
 
     @Slot()
     def handle_scan_finished(self) -> None:
-        print("スキャン完了シグナル受信"); error_count: int = self.results_tabs_widget.error_table.rowCount()
+        """スキャンが正常に完了したときの処理"""
+        print("スキャン完了シグナル受信")
+        error_count: int = self.results_tabs_widget.error_table.rowCount()
         if error_count > 0: self.status_label.setText(f"ステータス: スキャン完了 ({error_count}件のエラーあり)")
         else: self.status_label.setText("ステータス: スキャン完了")
-        self._set_progress_bar_visible(False); self._update_ui_state(scan_enabled=True, cancel_enabled=False) # アクションボタンの状態は populate で更新
-        self.current_worker = None # 処理完了したので参照をクリア
+        self._set_progress_bar_visible(False); self._update_ui_state(scan_enabled=True, cancel_enabled=False)
+        # ★ 正常完了時は状態ファイルを削除 ★
+        if self.dir_path_edit.text():
+            delete_scan_state(self.dir_path_edit.text())
+        self.current_worker = None
 
     @Slot()
     def handle_scan_cancelled(self) -> None:
@@ -171,34 +239,51 @@ class ImageCleanerWindow(QMainWindow):
         print("スキャン中止シグナル受信")
         self.status_label.setText("ステータス: スキャンが中断されました。")
         self._set_progress_bar_visible(False)
-        self._update_ui_state(scan_enabled=True, actions_enabled=False, cancel_enabled=False) # ボタン状態をリセット
-        self.current_worker = None # 処理完了したので参照をクリア
+        self._update_ui_state(scan_enabled=True, actions_enabled=False, cancel_enabled=False)
+        # ★ 中断時は状態ファイルは削除しない ★
+        self.current_worker = None
 
     @Slot()
-    def update_preview_display(self) -> None: primary_path: Optional[str]; secondary_path: Optional[str]; primary_path, secondary_path = self.results_tabs_widget.get_current_selection_paths(); self.preview_widget.update_previews(primary_path, secondary_path)
+    def update_preview_display(self) -> None:
+        # 変更なし
+        primary_path, secondary_path = self.results_tabs_widget.get_current_selection_paths()
+        self.preview_widget.update_previews(primary_path, secondary_path)
+
     @Slot()
     def delete_selected_items(self) -> None:
+        # 変更なし
         files_to_delete: List[str] = self._get_files_to_delete_from_current_tab()
         if not files_to_delete: return
         self._delete_files_and_update_ui(files_to_delete)
+
     @Slot(str)
-    def _delete_single_file_from_preview(self, file_path: str) -> None: self._handle_delete_request(file_path)
+    def _delete_single_file_from_preview(self, file_path: str) -> None:
+        # 変更なし
+        self._handle_delete_request(file_path)
+
     @Slot(str)
     def _handle_delete_request(self, file_path: str) -> None:
+        # 変更なし
         if not file_path: return
         self._delete_files_and_update_ui([file_path])
+
     @Slot(str)
     def _handle_open_request(self, file_path: str) -> None:
+        # 変更なし
         print(f"オープン要求受信: {file_path}");
         if file_path: open_file_external(file_path, self)
+
     @Slot(str, list)
     def _handle_delete_duplicates_request(self, keep_path: str, delete_paths: List[str]) -> None:
+        # 変更なし
         if not delete_paths: return
         print(f"重複グループ削除要求受信: Keep='{os.path.basename(keep_path)}', Delete={len(delete_paths)} files")
         if self._confirm_duplicate_deletion(keep_path, delete_paths): self._delete_files_and_update_ui(delete_paths)
         else: print("重複グループの削除はキャンセルされました。")
+
     @Slot()
     def save_results(self) -> None:
+        # 変更なし
         current_dir: str = self.dir_path_edit.text();
         if not self._validate_directory(current_dir, "保存"): return
         filepath: Optional[str] = self._get_save_filepath(current_dir)
@@ -206,8 +291,10 @@ class ImageCleanerWindow(QMainWindow):
         self.current_settings['last_save_load_dir'] = os.path.dirname(filepath); results_data: ResultsData = self.results_tabs_widget.get_results_data(); success: bool = save_results_to_file(filepath, results_data, current_dir, self.current_settings)
         if success: QMessageBox.information(self, "保存完了", f"結果を以下のファイルに保存しました:\n{filepath}"); self.results_saved = True
         else: QMessageBox.critical(self, "保存エラー", "結果ファイルの保存中にエラーが発生しました。")
+
     @Slot()
     def load_results(self) -> None:
+        # 変更なし
         if not self.results_saved:
              if not self._confirm_unsaved_results("結果を読み込み"): return
         filepath: Optional[str] = self._get_load_filepath()
@@ -224,8 +311,8 @@ class ImageCleanerWindow(QMainWindow):
         if settings_used: print("読み込んだ結果のスキャン時設定:", settings_used)
         self.status_label.setText(f"ステータス: 結果を読み込みました ({os.path.basename(filepath)})"); has_results: bool = bool(results_data and (results_data.get('blurry') or results_data.get('similar') or results_data.get('duplicates'))); self._update_ui_state(scan_enabled=True, actions_enabled=has_results, cancel_enabled=False); self.results_saved = True
 
-    # --- ヘルパーメソッド ---
-    def _clear_all_results(self) -> None: self.results_tabs_widget.clear_results(); self.preview_widget.clear_previews(); self.results_saved = True # クリアしたら保存済み扱い
+    # --- ヘルパーメソッド (変更なし) ---
+    def _clear_all_results(self) -> None: self.results_tabs_widget.clear_results(); self.preview_widget.clear_previews(); self.results_saved = True
     def _validate_directory(self, dir_path: str, action_name: str = "処理") -> bool:
         if not dir_path or not os.path.isdir(dir_path): QMessageBox.warning(self, "エラー", f"有効なフォルダが選択されていません。\n{action_name}を実行できません。"); self.status_label.setText(f"ステータス: エラー ({action_name} - フォルダ未選択)"); return False
         return True
@@ -260,36 +347,45 @@ class ImageCleanerWindow(QMainWindow):
     def _set_scan_controls_enabled(self, enabled: bool) -> None: self.scan_button.setEnabled(enabled); self.settings_button.setEnabled(enabled)
     def _set_action_buttons_enabled(self, enabled: bool) -> None: self.delete_button.setEnabled(enabled); self.select_all_blurry_button.setEnabled(enabled); self.select_all_similar_button.setEnabled(enabled); self.select_all_duplicates_button.setEnabled(enabled); self.deselect_all_button.setEnabled(enabled)
     def _set_progress_bar_visible(self, visible: bool) -> None: self.progress_bar.setVisible(visible); (not visible) and self.progress_bar.setValue(0)
-    # ★ UI状態更新ヘルパーを修正 ★
     def _update_ui_state(self, scan_enabled: Optional[bool] = None, actions_enabled: Optional[bool] = None, cancel_enabled: Optional[bool] = None) -> None:
         """UIの主要なコントロールの有効/無効状態を一括で更新"""
         if scan_enabled is not None:
             self._set_scan_controls_enabled(scan_enabled)
-            self.load_results_button.setEnabled(scan_enabled) # スキャン中は読み込み不可
-            self.scan_button.setVisible(not cancel_enabled if cancel_enabled is not None else scan_enabled) # スキャンボタン表示制御
+            self.load_results_button.setEnabled(scan_enabled)
+            self.scan_button.setVisible(not cancel_enabled if cancel_enabled is not None else scan_enabled)
         if actions_enabled is not None:
             self._set_action_buttons_enabled(actions_enabled)
-            self.save_results_button.setEnabled(actions_enabled) # 結果がないと保存不可
+            self.save_results_button.setEnabled(actions_enabled)
         if cancel_enabled is not None:
             self.cancel_button.setVisible(cancel_enabled)
             self.cancel_button.setEnabled(cancel_enabled)
 
     # --- イベントハンドラ ---
     def closeEvent(self, event: QCloseEvent) -> None:
-        if not self._confirm_unsaved_results("アプリケーションを終了"): event.ignore(); return
-        if self.threadpool.activeThreadCount() > 0:
-             reply = QMessageBox.question(self, "確認", "スキャン処理が実行中です。終了しますか？\n(処理はバックグラウンドで続行されます)", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
-             if reply == QMessageBox.StandardButton.No: event.ignore(); return
-             else: print("警告: スキャン処理が完了する前にウィンドウを閉じます。"); self.current_worker and self.current_worker.request_cancellation() # 終了時に中止要求
+        # ★ 実行中のワーカーがいれば中止要求を出す ★
+        if self.current_worker and not self._cancellation_requested:
+             reply = QMessageBox.question(self, "確認", "スキャン処理が実行中です。中止して終了しますか？\n(現在の状態は保存されます)", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+             if reply == QMessageBox.StandardButton.Yes:
+                 print("終了前にスキャンを中止します...")
+                 self.request_scan_cancellation() # 状態保存をトリガー
+                 # ここでワーカーの終了を待つのは難しいので、そのまま終了する
+             else:
+                 event.ignore() # 終了をキャンセル
+                 return
+
+        # ★ 未保存の結果確認は不要かも (状態ファイルで管理するため) ★
+        # if not self._confirm_unsaved_results("アプリケーションを終了"): event.ignore(); return
+
         if not save_settings(self.current_settings): print("警告: 設定ファイルの保存に失敗しました。")
         event.accept()
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        # 変更なし
         key: int = event.key(); left_path: Optional[str] = self.preview_widget.get_left_image_path(); right_path: Optional[str] = self.preview_widget.get_right_image_path()
         if key == Qt.Key.Key_Q: self._delete_single_file_from_preview(left_path)
         elif key == Qt.Key.Key_W: self._delete_single_file_from_preview(right_path)
         elif key == Qt.Key.Key_A: left_path and self._handle_open_request(left_path)
         elif key == Qt.Key.Key_S: right_path and self._handle_open_request(right_path)
-        # Esc キーでスキャン中止 (オプション)
         elif key == Qt.Key.Key_Escape and self.cancel_button.isVisible() and self.cancel_button.isEnabled():
              print("Escキー: スキャン中止要求")
              self.request_scan_cancellation()
