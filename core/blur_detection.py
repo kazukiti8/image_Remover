@@ -2,60 +2,80 @@
 import cv2
 import numpy as np
 import os
+from typing import Tuple, Optional, Any # ★ typing をインポート ★
 
-# ★ 画像ローダー関数をインポート ★
+# ★ 型エイリアス ★
+NumpyImageType = np.ndarray[Any, Any]
+ErrorMsgType = Optional[str]
+BlurResult = Tuple[Optional[float], ErrorMsgType] # (スコア or None, エラーメッセージ or None)
+
+# 画像ローダー関数をインポート
 try:
-    from utils.image_loader import load_image_as_numpy
+    # utils パッケージからの相対インポートを試みる
+    # (このファイルが core パッケージ内にある前提)
+    from ..utils.image_loader import load_image_as_numpy
 except ImportError:
-    print("エラー: utils.image_loader のインポートに失敗しました。")
-    # ダミー関数 (エラーを返す)
-    def load_image_as_numpy(path, mode='gray'):
-        return None, "Image loader not available"
+    # インポート失敗時のフォールバック (プロジェクト構造に依存)
+    try:
+        from utils.image_loader import load_image_as_numpy
+    except ImportError:
+        print("エラー: utils.image_loader のインポートに失敗しました。")
+        # ダミー関数
+        def load_image_as_numpy(path: str, mode: str = 'gray') -> Tuple[Optional[NumpyImageType], ErrorMsgType]:
+            return None, "Image loader not available"
 
-def calculate_fft_blur_score_v2(image_path, low_freq_radius_ratio=0.05):
+def calculate_fft_blur_score_v2(image_path: str, low_freq_radius_ratio: float = 0.05) -> BlurResult:
     """
     FFTを使用して画像のブレ度合いを評価するスコア(v2)を計算します。
     HEIC/HEIF形式に対応。
+
+    Args:
+        image_path (str): 評価する画像ファイルのパス。
+        low_freq_radius_ratio (float): 画像中心からの半径の比率。
+
+    Returns:
+        BlurResult: (スコア: float or None, エラーメッセージ: str or None)
     """
-    # ★ 画像をグレースケールで読み込み (NumPy配列) ★
+    img_gray: Optional[NumpyImageType]
+    error_msg: ErrorMsgType
     img_gray, error_msg = load_image_as_numpy(image_path, mode='gray')
 
     if error_msg:
-        # 読み込みエラーメッセージをそのまま返す
         return None, error_msg
-    if img_gray is None: # 念のためNoneチェック
+    if img_gray is None:
         return None, "画像データの取得に失敗 (blur_detection)"
 
     try:
-        # 2. 画像の次元を取得
+        h: int
+        w: int
         h, w = img_gray.shape
-        crow, ccol = h // 2 , w // 2
+        crow: int = h // 2
+        ccol: int = w // 2
 
-        # 3. FFTを実行 & 中心シフト
-        # ★ img_gray は既に NumPy 配列 (float32に変換) ★
-        dft = cv2.dft(np.float32(img_gray), flags=cv2.DFT_COMPLEX_OUTPUT)
-        dft_shift = np.fft.fftshift(dft)
+        # float32に変換
+        img_float32: np.ndarray[Any, np.dtype[np.float32]] = np.float32(img_gray)
+        dft: np.ndarray[Any, Any] = cv2.dft(img_float32, flags=cv2.DFT_COMPLEX_OUTPUT)
+        dft_shift: np.ndarray[Any, Any] = np.fft.fftshift(dft)
 
-        # 4. 振幅スペクトルを計算
-        magnitude_spectrum = cv2.magnitude(dft_shift[:, :, 0], dft_shift[:, :, 1])
+        magnitude_spectrum: np.ndarray[Any, Any] = cv2.magnitude(dft_shift[:, :, 0], dft_shift[:, :, 1])
 
-        # 5. 低周波領域マスク
-        radius = int(low_freq_radius_ratio * min(h, w)); radius = max(1, radius)
-        mask = np.zeros((h, w), np.uint8)
+        radius: int = int(low_freq_radius_ratio * min(h, w))
+        radius = max(1, radius) # 半径は最低1
+        mask: np.ndarray[Any, np.dtype[np.uint8]] = np.zeros((h, w), np.uint8)
         cv2.circle(mask, (ccol, crow), radius, 1, thickness=-1)
 
-        # 6. エネルギー計算
-        total_magnitude_sum = np.sum(magnitude_spectrum)
-        low_freq_magnitude_sum = np.sum(magnitude_spectrum * mask)
+        total_magnitude_sum: float = np.sum(magnitude_spectrum)
+        low_freq_magnitude_sum: float = np.sum(magnitude_spectrum * mask)
 
-        # 7. スコア計算
-        if total_magnitude_sum <= 0: return 0.0, None
-        low_freq_magnitude_sum = max(0, low_freq_magnitude_sum)
+        if total_magnitude_sum <= 0:
+            return 0.0, None
+
+        low_freq_magnitude_sum = max(0.0, low_freq_magnitude_sum)
         low_freq_magnitude_sum = min(low_freq_magnitude_sum, total_magnitude_sum)
-        high_freq_magnitude_sum = total_magnitude_sum - low_freq_magnitude_sum
-        score = high_freq_magnitude_sum / total_magnitude_sum
+        high_freq_magnitude_sum: float = total_magnitude_sum - low_freq_magnitude_sum
+        score: float = high_freq_magnitude_sum / total_magnitude_sum
 
-        return score, None # 成功
+        return score, None
 
     except cv2.error as e:
         error_msg = f"OpenCVエラー(FFT): {e.msg}"

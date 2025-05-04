@@ -1,82 +1,82 @@
 # utils/config_handler.py
 import os
 import json
-# QMessageBox はここでは不要になったので削除
+from typing import Dict, Any, Union, Optional # ★ typing をインポート ★
 
-# 設定ファイルのパス (ユーザーのホームディレクトリに隠しファイルとして)
-SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".image_cleaner_settings.json")
+# 設定ファイルのパス
+SETTINGS_FILE: str = os.path.join(os.path.expanduser("~"), ".image_cleaner_settings.json")
 
-# デフォルト設定値 (pHash関連を追加)
-DEFAULT_SETTINGS = {
-    'blur_threshold': 0.80,
-    'use_phash': True,         # pHashを使用するかどうか
-    'hash_threshold': 5,       # pHashのハミング距離閾値
-    'orb_nfeatures': 1500,
-    'orb_ratio_threshold': 0.70,
-    'min_good_matches': 40,
-    'last_directory': os.path.expanduser("~") # 最後に開いたディレクトリ
+# デフォルト設定値と型を定義
+DEFAULT_SETTINGS: Dict[str, Union[float, bool, int, str]] = {
+    'blur_threshold': 0.80,       # float
+    'use_phash': True,            # bool
+    'hash_threshold': 5,          # int
+    'orb_nfeatures': 1500,        # int
+    'orb_ratio_threshold': 0.70,  # float
+    'min_good_matches': 40,       # int
+    'last_directory': os.path.expanduser("~") # str
 }
+# 設定値の型エイリアス
+SettingsDict = Dict[str, Union[float, bool, int, str]]
 
-def load_settings():
+def load_settings() -> SettingsDict:
     """設定ファイルを読み込み、設定辞書を返す"""
-    current_settings = DEFAULT_SETTINGS.copy() # まずデフォルト値で初期化
+    current_settings: SettingsDict = DEFAULT_SETTINGS.copy()
     if os.path.exists(SETTINGS_FILE):
         try:
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                loaded_settings = json.load(f)
-                # デフォルト設定に含まれるキーのみを読み込み、型もチェック
+                loaded_settings: Dict[str, Any] = json.load(f) # 読み込み時は Any
                 for key, default_value in DEFAULT_SETTINGS.items():
                     if key in loaded_settings:
-                        # 型が一致するかチェック (bool, int, float, str)
-                        # isinstance(True, int) は True になるため、boolは特別扱い
-                        if isinstance(default_value, bool):
-                            if isinstance(loaded_settings[key], bool):
-                                current_settings[key] = loaded_settings[key]
-                            else:
-                                print(f"警告: 設定ファイルの値の型が不正です ({key}: bool期待)。デフォルト値を使用します。")
-                        elif isinstance(loaded_settings[key], type(default_value)):
-                             # 数値型(int, float) または 文字列型(str) の場合
-                             current_settings[key] = loaded_settings[key]
-                        # int設定にfloat値が入っている場合などは許容しない (厳密に)
-                        # elif isinstance(default_value, int) and isinstance(loaded_settings[key], float):
-                        #     current_settings[key] = int(loaded_settings[key]) # 丸める場合
-                        else:
-                            print(f"警告: 設定ファイルの値の型が不正です ({key}: {type(default_value).__name__}期待)。デフォルト値を使用します。")
-                    # else:
-                        # 設定ファイルにキーが存在しない場合はデフォルト値が使われる
-                        # print(f"情報: 設定ファイルにキー '{key}' がありません。デフォルト値を使用します。")
-
+                        loaded_value: Any = loaded_settings[key]
+                        expected_type: type = type(default_value)
+                        # 型チェック
+                        if isinstance(default_value, bool): # bool は int のサブクラスなので特別扱い
+                            if isinstance(loaded_value, bool):
+                                current_settings[key] = loaded_value
+                            else: print(f"警告: 設定 '{key}' の型不正 (bool期待)。デフォルト値使用。")
+                        elif isinstance(loaded_value, expected_type):
+                            current_settings[key] = loaded_value
+                        else: print(f"警告: 設定 '{key}' の型不正 ({expected_type.__name__}期待)。デフォルト値使用。")
                 print(f"設定ファイルを読み込みました: {SETTINGS_FILE}")
         except (json.JSONDecodeError, TypeError, ValueError, OSError) as e:
-            print(f"警告: 設定ファイルの読み込みに失敗しました ({e})。デフォルト設定を使用します。")
-            # エラーが発生した場合もデフォルト設定を返す
+            print(f"警告: 設定ファイルの読み込み失敗 ({e})。デフォルト設定使用。")
             current_settings = DEFAULT_SETTINGS.copy()
         except Exception as e:
-             print(f"警告: 設定ファイルの読み込み中に予期せぬエラーが発生しました ({e})。デフォルト設定を使用します。")
+             print(f"警告: 設定ファイル読み込み中に予期せぬエラー ({e})。デフォルト設定使用。")
              current_settings = DEFAULT_SETTINGS.copy()
     else:
         print("設定ファイルが見つかりません。デフォルト設定を使用します。")
-        # 初回起動時など、設定ファイルがない場合はデフォルト設定でファイルを作成する
-        save_settings(current_settings) # ここで保存を試みる
+        save_settings(current_settings) # 初回起動時に作成試行
 
     return current_settings
 
-def save_settings(settings_to_save):
+def save_settings(settings_to_save: SettingsDict) -> bool:
     """現在の設定をファイルに保存する"""
-    # 保存する前に、デフォルトに含まれないキーを削除する（オプション）
-    valid_settings = {k: settings_to_save.get(k, v) for k, v in DEFAULT_SETTINGS.items()}
+    # 保存前にデフォルトに含まれるキーのみ抽出し、型を強制する (より安全に)
+    valid_settings: SettingsDict = {}
+    for key, default_value in DEFAULT_SETTINGS.items():
+        value_to_save: Any = settings_to_save.get(key, default_value) # なければデフォルト値
+        expected_type: type = type(default_value)
+        # 型チェックと変換 (可能な範囲で)
+        try:
+            if isinstance(default_value, bool):
+                valid_settings[key] = bool(value_to_save)
+            elif isinstance(default_value, int):
+                 valid_settings[key] = int(value_to_save)
+            elif isinstance(default_value, float):
+                 valid_settings[key] = float(value_to_save)
+            else: # str など
+                 valid_settings[key] = expected_type(value_to_save)
+        except (ValueError, TypeError):
+             print(f"警告: 設定 '{key}' の値を正しい型に変換できません。デフォルト値 ({default_value}) を保存します。")
+             valid_settings[key] = default_value # 変換失敗時はデフォルト値
 
     try:
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
-            # indent=4 で整形して保存
             json.dump(valid_settings, f, ensure_ascii=False, indent=4)
         print(f"設定を保存しました: {SETTINGS_FILE}")
-        return True # 保存成功
-    except OSError as e:
-        print(f"警告: 設定ファイルの保存に失敗しました ({e})。")
-        # GUIコンテキストがないため、ここではエラーメッセージ表示はしない
-        # 必要であれば呼び出し元で表示する
-        return False # 保存失敗
-    except Exception as e:
-        print(f"警告: 設定ファイルの保存中に予期せぬエラーが発生しました ({e})。")
-        return False
+        return True
+    except OSError as e: print(f"警告: 設定ファイルの保存失敗 (OSError: {e})。"); return False
+    except Exception as e: print(f"警告: 設定ファイル保存中に予期せぬエラー ({e})。"); return False
+
