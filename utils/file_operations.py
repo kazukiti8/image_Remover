@@ -2,7 +2,7 @@
 import os
 import time
 import cv2
-from PySide6.QtWidgets import QMessageBox # 確認ダイアログ用にインポート
+from PySide6.QtWidgets import QMessageBox
 
 try:
     import send2trash
@@ -32,26 +32,35 @@ def get_file_info(file_path):
             dimensions = f"{w}x{h}"
         else:
              print(f"警告: 解像度取得のため画像読み込み失敗 ({file_path})")
+             dimensions = "読込エラー" # ★ テーブル表示用に変更 ★
 
+    except FileNotFoundError:
+        print(f"警告: ファイル情報取得エラー - ファイルが見つかりません ({file_path})")
+        file_size, mod_time, dimensions = "削除済?", "削除済?", "削除済?" # 削除された可能性
+    except PermissionError:
+        print(f"警告: ファイル情報取得エラー - アクセス権がありません ({file_path})")
+        file_size, mod_time, dimensions = "アクセス不可", "アクセス不可", "アクセス不可"
     except Exception as e:
         print(f"警告: ファイル情報/解像度取得エラー ({file_path}): {e}")
+        dimensions = "エラー" # ★ テーブル表示用に変更 ★
 
     return file_size, mod_time, dimensions
 
 def delete_files_to_trash(file_paths, parent_widget=None):
     """
     指定されたファイルパスのリストをゴミ箱に移動する。
-    確認ダイアログを表示し、結果(成功数, エラーリスト)を返す。
+    確認ダイアログを表示し、結果(成功数, エラーリスト[辞書], 削除成功パスセット)を返す。
+    エラーリストは {'path': file_path, 'error': error_message} の形式。
     """
     if send2trash is None:
         QMessageBox.critical(parent_widget, "エラー", "send2trash ライブラリが見つかりません。\n削除機能を使用できません。")
-        return 0, ["send2trashライブラリがありません"]
+        return 0, [{"path": "N/A", "error": "send2trashライブラリがありません"}], set()
 
-    unique_files_to_delete = sorted(list(set(file_paths))) # 重複削除
+    unique_files_to_delete = sorted(list(set(file_paths)))
 
     if not unique_files_to_delete:
         QMessageBox.information(parent_widget, "情報", "削除対象のファイルが選択されていません。")
-        return 0, []
+        return 0, [], set()
 
     # --- 確認ダイアログを表示 ---
     num_files = len(unique_files_to_delete)
@@ -71,7 +80,7 @@ def delete_files_to_trash(file_paths, parent_widget=None):
     if reply == QMessageBox.StandardButton.Yes:
         print(f"{num_files} 個のファイルをゴミ箱へ移動します...")
         deleted_count = 0
-        errors = []
+        errors = [] # ★ エラー情報を辞書で格納するように変更 ★
         files_actually_deleted = set()
 
         # --- 削除処理実行 ---
@@ -84,31 +93,44 @@ def delete_files_to_trash(file_paths, parent_widget=None):
                     deleted_count += 1
                     files_actually_deleted.add(normalized_path)
                 else:
-                    print(f"  削除スキップ: ファイルが見つかりません {normalized_path}")
-                    errors.append(f"{os.path.basename(normalized_path)}: ファイルが見つかりません")
-            except Exception as e:
-                print(f"  削除エラー: {file_path} - {e}")
-                errors.append(f"{os.path.basename(file_path)}: {e}")
+                    err_msg = "ファイルが見つかりません"
+                    print(f"  削除スキップ: {err_msg} {normalized_path}")
+                    errors.append({'path': normalized_path, 'error': err_msg}) # ★ 辞書で追加 ★
+            except PermissionError as e:
+                err_msg = f"アクセス権がありません: {e}"
+                print(f"  削除エラー: {file_path} - {err_msg}")
+                errors.append({'path': file_path, 'error': err_msg}) # ★ 辞書で追加 ★
+            except OSError as e: # send2trash が OSError を出すことがある
+                err_msg = f"OSエラー: {e}"
+                print(f"  削除エラー: {file_path} - {err_msg}")
+                errors.append({'path': file_path, 'error': err_msg}) # ★ 辞書で追加 ★
+            except Exception as e: # その他の予期せぬエラー
+                err_msg = f"予期せぬエラー: {e}"
+                print(f"  削除エラー: {file_path} - {err_msg}")
+                errors.append({'path': file_path, 'error': err_msg}) # ★ 辞書で追加 ★
 
         # --- 結果メッセージ表示 ---
         if errors:
-             QMessageBox.warning(parent_widget, "削除エラー", f"{len(errors)} 個のファイルの削除中にエラーが発生しました:\n" + "\n".join(errors))
+             # ★ エラーメッセージ表示を改善 ★
+             error_details = "\n".join([f"- {os.path.basename(e['path'])}: {e['error']}" for e in errors[:5]]) # 先頭5件表示
+             if len(errors) > 5:
+                 error_details += f"\n...他 {len(errors) - 5} 件のエラー"
+             QMessageBox.warning(parent_widget, "削除エラー", f"{len(errors)} 個のファイルの削除中にエラーが発生しました:\n{error_details}")
         if deleted_count > 0:
              QMessageBox.information(parent_widget, "削除完了", f"{deleted_count} 個のファイルをゴミ箱に移動しました。")
 
-        return deleted_count, errors, files_actually_deleted # 実際に削除したファイルのセットも返す
+        return deleted_count, errors, files_actually_deleted
     else:
         print("削除がキャンセルされました。")
-        return 0, [], set() # キャンセル時は空を返す
+        return 0, [], set()
 
 def open_file_external(file_path, parent_widget=None):
-    """指定されたファイルを関連付けられたアプリケーションで開く"""
+    # (変更なし)
     if not file_path or not os.path.exists(file_path):
         print(f"ファイルが見つかりません: {file_path}")
         QMessageBox.warning(parent_widget, "エラー", f"ファイルが見つかりません:\n{file_path}")
         return
     try:
-        # os.startfile は Windows 専用
         os.startfile(os.path.normpath(file_path))
         print(f"ファイルを開きました: {file_path}")
     except Exception as e:
