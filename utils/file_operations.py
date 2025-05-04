@@ -11,10 +11,15 @@ except ImportError:
     send2trash = None
 
 def get_file_info(file_path):
-    """指定されたファイルの基本情報（サイズ、更新日時、解像度）を取得する"""
+    """
+    指定されたファイルの基本情報（サイズ、更新日時、解像度）を取得する。
+    解像度取得でエラーが発生した場合、エラーメッセージを返すように変更。
+    """
     file_size = "N/A"
     mod_time = "N/A"
     dimensions = "N/A"
+    dimension_error = None # 解像度取得エラーメッセージ用
+
     try:
         # ファイルサイズと更新日時
         stat_info = os.stat(file_path)
@@ -26,31 +31,55 @@ def get_file_info(file_path):
         mod_time = time.strftime('%Y/%m/%d %H:%M', time.localtime(stat_info.st_mtime))
 
         # 解像度取得 (画像を開く)
-        img = cv2.imread(file_path)
-        if img is not None:
-            h, w = img.shape[:2]
-            dimensions = f"{w}x{h}"
-        else:
-             print(f"警告: 解像度取得のため画像読み込み失敗 ({file_path})")
-             dimensions = "読込エラー" # ★ テーブル表示用に変更 ★
+        try:
+            img = cv2.imread(file_path)
+            if img is not None:
+                h, w = img.shape[:2]
+                dimensions = f"{w}x{h}"
+            else:
+                # 読み込みは成功したが画像データがない場合
+                dimension_error = "画像読込不可(形式/破損?)"
+                dimensions = "読込エラー"
+                print(f"警告: 解像度取得のため画像読み込み失敗 ({os.path.basename(file_path)}) - {dimension_error}")
+        except cv2.error as e:
+            dimension_error = f"OpenCVエラー: {e.msg}"
+            dimensions = "読込エラー"
+            print(f"警告: 解像度取得中にOpenCVエラー ({os.path.basename(file_path)}): {e.msg}")
+        except MemoryError:
+            dimension_error = "メモリ不足"
+            dimensions = "読込エラー"
+            print(f"警告: 解像度取得中にメモリ不足 ({os.path.basename(file_path)})")
+        except Exception as e:
+            dimension_error = f"予期せぬエラー: {type(e).__name__}"
+            dimensions = "読込エラー"
+            print(f"警告: 解像度取得中に予期せぬエラー ({os.path.basename(file_path)}): {e}")
 
     except FileNotFoundError:
         print(f"警告: ファイル情報取得エラー - ファイルが見つかりません ({file_path})")
-        file_size, mod_time, dimensions = "削除済?", "削除済?", "削除済?" # 削除された可能性
+        file_size, mod_time, dimensions = "削除済?", "削除済?", "削除済?"
+        dimension_error = "ファイルなし" # エラー情報として設定
     except PermissionError:
         print(f"警告: ファイル情報取得エラー - アクセス権がありません ({file_path})")
         file_size, mod_time, dimensions = "アクセス不可", "アクセス不可", "アクセス不可"
+        dimension_error = "アクセス権なし" # エラー情報として設定
     except Exception as e:
-        print(f"警告: ファイル情報/解像度取得エラー ({file_path}): {e}")
-        dimensions = "エラー" # ★ テーブル表示用に変更 ★
+        # statに関するその他のエラー
+        print(f"警告: ファイル情報取得エラー ({file_path}): {e}")
+        file_size, mod_time = "エラー", "エラー"
+        # dimensions は try-except 内で設定されている可能性があるためそのまま
+        if dimension_error is None: # 解像度取得前にエラーが起きた場合
+            dimension_error = f"ファイル情報取得エラー: {type(e).__name__}"
+            dimensions = "エラー"
 
-    return file_size, mod_time, dimensions
+    # dimension_error は現状返り値に含めていないが、必要ならタプルで返すなど変更可能
+    return file_size, mod_time, dimensions # dimension_error は返さない
 
 def delete_files_to_trash(file_paths, parent_widget=None):
     """
     指定されたファイルパスのリストをゴミ箱に移動する。
     確認ダイアログを表示し、結果(成功数, エラーリスト[辞書], 削除成功パスセット)を返す。
     エラーリストは {'path': file_path, 'error': error_message} の形式。
+    (この関数は変更なし)
     """
     if send2trash is None:
         QMessageBox.critical(parent_widget, "エラー", "send2trash ライブラリが見つかりません。\n削除機能を使用できません。")
@@ -80,7 +109,7 @@ def delete_files_to_trash(file_paths, parent_widget=None):
     if reply == QMessageBox.StandardButton.Yes:
         print(f"{num_files} 個のファイルをゴミ箱へ移動します...")
         deleted_count = 0
-        errors = [] # ★ エラー情報を辞書で格納するように変更 ★
+        errors = [] # エラー情報を辞書で格納
         files_actually_deleted = set()
 
         # --- 削除処理実行 ---
@@ -95,23 +124,22 @@ def delete_files_to_trash(file_paths, parent_widget=None):
                 else:
                     err_msg = "ファイルが見つかりません"
                     print(f"  削除スキップ: {err_msg} {normalized_path}")
-                    errors.append({'path': normalized_path, 'error': err_msg}) # ★ 辞書で追加 ★
+                    errors.append({'path': normalized_path, 'error': err_msg})
             except PermissionError as e:
                 err_msg = f"アクセス権がありません: {e}"
                 print(f"  削除エラー: {file_path} - {err_msg}")
-                errors.append({'path': file_path, 'error': err_msg}) # ★ 辞書で追加 ★
+                errors.append({'path': file_path, 'error': err_msg})
             except OSError as e: # send2trash が OSError を出すことがある
                 err_msg = f"OSエラー: {e}"
                 print(f"  削除エラー: {file_path} - {err_msg}")
-                errors.append({'path': file_path, 'error': err_msg}) # ★ 辞書で追加 ★
+                errors.append({'path': file_path, 'error': err_msg})
             except Exception as e: # その他の予期せぬエラー
                 err_msg = f"予期せぬエラー: {e}"
                 print(f"  削除エラー: {file_path} - {err_msg}")
-                errors.append({'path': file_path, 'error': err_msg}) # ★ 辞書で追加 ★
+                errors.append({'path': file_path, 'error': err_msg})
 
         # --- 結果メッセージ表示 ---
         if errors:
-             # ★ エラーメッセージ表示を改善 ★
              error_details = "\n".join([f"- {os.path.basename(e['path'])}: {e['error']}" for e in errors[:5]]) # 先頭5件表示
              if len(errors) > 5:
                  error_details += f"\n...他 {len(errors) - 5} 件のエラー"
@@ -125,15 +153,31 @@ def delete_files_to_trash(file_paths, parent_widget=None):
         return 0, [], set()
 
 def open_file_external(file_path, parent_widget=None):
-    # (変更なし)
+    """
+    指定されたファイルを外部アプリケーションで開く。
+    (この関数は変更なし)
+    """
     if not file_path or not os.path.exists(file_path):
         print(f"ファイルが見つかりません: {file_path}")
         QMessageBox.warning(parent_widget, "エラー", f"ファイルが見つかりません:\n{file_path}")
         return
     try:
-        os.startfile(os.path.normpath(file_path))
+        # Windows のみ: os.startfile を使用
+        if os.name == 'nt':
+            os.startfile(os.path.normpath(file_path))
+        # macOS: open コマンドを使用
+        elif sys.platform == 'darwin':
+            subprocess.call(['open', os.path.normpath(file_path)])
+        # Linux: xdg-open コマンドを使用
+        else:
+            subprocess.call(['xdg-open', os.path.normpath(file_path)])
         print(f"ファイルを開きました: {file_path}")
+    except FileNotFoundError: # startfile や open/xdg-open が見つからない場合
+         QMessageBox.critical(parent_widget, "エラー", f"ファイルを開くコマンドが見つかりません。\nOSを確認してください。")
     except Exception as e:
         print(f"ファイルを開けませんでした ({file_path}): {e}")
         QMessageBox.critical(parent_widget, "エラー", f"ファイルを開けませんでした:\n{file_path}\n\n{e}")
 
+# open_file_external で subprocess, sys を使うためインポート
+import subprocess
+import sys

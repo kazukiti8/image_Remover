@@ -16,21 +16,23 @@ def calculate_fft_blur_score_v2(image_path, low_freq_radius_ratio=0.05):
                                        デフォルトは0.05 (画像幅・高さの小さい方の5%)。
 
     Returns:
-        float: FFTベースのブレ度スコア(比率)。0.0〜1.0の範囲。
-               画像が読み込めない場合やエラー時は -1.0 を返す。
-               スコアが高いほどシャープ。
+        tuple: (float or None, str or None)
+               成功時は (スコア, None)。スコアは 0.0〜1.0。
+               失敗時は (None, エラーメッセージ)。
     """
-    # ファイル存在チェックは呼び出し元で行う想定でも良い
     if not os.path.exists(image_path):
-        # print(f"エラー: 画像ファイルが見つかりません: {image_path}")
-        return -1.0
+        # ファイルが存在しない場合はエラーメッセージを返す
+        return None, f"ファイルが見つかりません: {os.path.basename(image_path)}"
 
     try:
         # 1. 画像をグレースケールで読み込む
+        # Note: imreadはファイルが存在しない場合Noneを返し、エラーは発生させないことが多い
+        # しかし、ファイル破損や非対応フォーマットの場合にエラーを出す可能性がある
         img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
         if img is None:
-            # print(f"エラー: 画像ファイルを読み込めません: {image_path}")
-            return -1.0
+            # 読み込み自体は成功したが、画像データが得られなかった場合
+            # (例: サポートされていないフォーマット、ファイルが0バイトなど)
+            return None, f"画像を読み込めません(形式/破損?): {os.path.basename(image_path)}"
 
         # 2. 画像の次元を取得
         h, w = img.shape
@@ -38,6 +40,7 @@ def calculate_fft_blur_score_v2(image_path, low_freq_radius_ratio=0.05):
         crow, ccol = h // 2 , w // 2
 
         # 3. FFTを実行 (2次元DFT) & 中心シフト
+        # メモリ不足などのエラーが発生する可能性
         dft = cv2.dft(np.float32(img), flags=cv2.DFT_COMPLEX_OUTPUT)
         dft_shift = np.fft.fftshift(dft)
 
@@ -58,12 +61,11 @@ def calculate_fft_blur_score_v2(image_path, low_freq_radius_ratio=0.05):
         # マスク(円内部が1, それ以外が0)を掛けて低周波領域のエネルギーを計算
         low_freq_magnitude_sum = np.sum(magnitude_spectrum * mask)
 
-        # デバッグ用出力 (必要ならコメント解除)
-        # print(f"Debug ({os.path.basename(image_path)}): Total={total_magnitude_sum:.2f}, LowFreq={low_freq_magnitude_sum:.2f}, Radius={radius}")
-
         # 7. スコア計算 (比率)
         if total_magnitude_sum <= 0:
-             return 0.0
+             # 通常、真っ黒な画像などで発生しうるが、エラーとは断定しにくい
+             return 0.0, None # スコア0として扱う
+
         # 念のためマイナスにならないように
         if low_freq_magnitude_sum < 0:
              low_freq_magnitude_sum = 0
@@ -73,12 +75,23 @@ def calculate_fft_blur_score_v2(image_path, low_freq_radius_ratio=0.05):
         high_freq_magnitude_sum = total_magnitude_sum - low_freq_magnitude_sum
         score = high_freq_magnitude_sum / total_magnitude_sum
 
-        return score
+        return score, None # 成功
 
+    except cv2.error as e:
+        # OpenCV固有のエラー (メモリ不足、不正な引数など)
+        error_msg = f"OpenCVエラー: {e.msg}"
+        print(f"エラー: ブレ検出処理中にOpenCVエラーが発生しました ({os.path.basename(image_path)}): {e.msg}")
+        return None, error_msg
+    except MemoryError:
+        # メモリ不足エラー
+        error_msg = "メモリ不足エラー"
+        print(f"エラー: ブレ検出処理中にメモリ不足が発生しました ({os.path.basename(image_path)})")
+        return None, error_msg
     except Exception as e:
-        # 実行時エラーが発生した場合
-        print(f"エラー: ブレ検出処理中に例外が発生しました ({os.path.basename(image_path)}): {e}")
-        return -1.0
+        # その他の予期せぬエラー
+        error_msg = f"予期せぬエラー: {type(e).__name__}"
+        print(f"エラー: ブレ検出処理中に予期せぬ例外が発生しました ({os.path.basename(image_path)}): {e}")
+        return None, error_msg
 
 # このファイルはモジュールとして使われるため、
 # if __name__ == '__main__': ブロックは含めません。
