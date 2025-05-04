@@ -5,12 +5,12 @@ import os
 import itertools
 import time
 from PIL import Image
-from typing import Tuple, Optional, List, Dict, Any, Union # ★ Any を使用 ★
+from typing import Tuple, Optional, List, Dict, Any, Union, Callable # ★ Callable をインポート ★
 
-# ★ 型エイリアス ★
+# 型エイリアス
 ErrorMsgType = Optional[str]
 NumpyImageType = np.ndarray[Any, Any]
-ImageType = Image.Image # Pillow Image
+ImageType = Image.Image
 HashType = Optional[Any] # imagehash の型 (Anyで代用)
 PhashResult = Tuple[HashType, ErrorMsgType]
 OrbScoreResult = Tuple[Optional[int], ErrorMsgType] # (スコア or None, エラー or None)
@@ -37,8 +37,7 @@ except ImportError:
     IMAGEHASH_AVAILABLE = False
     print("警告: ImageHash ライブラリが見つかりません。")
 
-# --- ★★★ 仮の WorkerSignals クラス定義を削除 ★★★ ---
-# class WorkerSignals: ...
+# WorkerSignals はここでは不要
 
 def calculate_phash(image_path: str) -> PhashResult:
     """指定された画像の Perceptual Hash (pHash) を計算します。HEIC対応。"""
@@ -47,10 +46,17 @@ def calculate_phash(image_path: str) -> PhashResult:
     img_pil, error_msg = load_image_pil(image_path)
     if error_msg: return None, error_msg
     if not img_pil: return None, "Pillowイメージの取得に失敗 (pHash)"
+
+    # ★★★ 修正箇所: try-except ブロックのインデント修正 ★★★
     try:
-        hash_value: imagehash.ImageHash = imagehash.phash(img_pil)
+        # imagehash.ImageHash 型は imagehash がインポートされている場合のみ有効
+        hash_value = imagehash.phash(img_pil) # type: ignore
         return hash_value, None
-    except Exception as e: error_msg = f"pHash計算エラー({type(e).__name__}): {e}"; print(f"エラー: pHash計算中にエラー ({os.path.basename(image_path)}): {e}"); return None, error_msg
+    except Exception as e:
+        error_msg = f"pHash計算エラー({type(e).__name__}): {e}"
+        print(f"エラー: pHash計算中にエラーが発生しました ({os.path.basename(image_path)}): {e}")
+        return None, error_msg
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 def calculate_orb_similarity_score(image_path1: str, image_path2: str,
                                    n_features: int = 1000, ratio_threshold: float = 0.75) -> OrbScoreResult:
@@ -62,66 +68,62 @@ def calculate_orb_similarity_score(image_path1: str, image_path2: str,
     img2_gray, err2 = load_image_as_numpy(image_path2, mode='gray')
     if err2: return None, f"画像2読込エラー: {err2}"
     if img1_gray is None or img2_gray is None: return None, "画像データの取得に失敗 (ORB)"
+
     try:
         orb: cv2.ORB = cv2.ORB_create(nfeatures=n_features)
         kp1: Tuple[cv2.KeyPoint, ...]; des1: Optional[NumpyImageType]
         kp2: Tuple[cv2.KeyPoint, ...]; des2: Optional[NumpyImageType]
         kp1, des1 = orb.detectAndCompute(img1_gray, None)
         kp2, des2 = orb.detectAndCompute(img2_gray, None)
-        if des1 is None or des2 is None or len(des1) < 2 or len(des2) < 2: return 0, None
+
+        if des1 is None or des2 is None or len(des1) < 2 or len(des2) < 2:
+            return 0, None # マッチ数0
+
         bf: cv2.BFMatcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
         matches: List[Tuple[cv2.DMatch, ...]] = bf.knnMatch(des1, des2, k=2)
+
         good_matches: List[cv2.DMatch] = []
         if matches is not None:
             for match_pair in matches:
                 if len(match_pair) == 2:
                     m: cv2.DMatch = match_pair[0]; n: cv2.DMatch = match_pair[1]
-                    if m.distance < ratio_threshold * n.distance: good_matches.append(m)
+                    if m.distance < ratio_threshold * n.distance:
+                        good_matches.append(m)
         return len(good_matches), None
-    except cv2.error as e: return None, f"OpenCVエラー(ORB): {e.msg}"
-    except MemoryError: return None, "メモリ不足エラー(ORB)"
-    except Exception as e: return None, f"予期せぬエラー(ORB): {type(e).__name__}"
+
+    except cv2.error as e:
+        return None, f"OpenCVエラー(ORB): {e.msg}"
+    except MemoryError:
+        return None, "メモリ不足エラー(ORB)"
+    except Exception as e:
+        return None, f"予期せぬエラー(ORB): {type(e).__name__}"
 
 
-def find_similar_pairs(directory_path: str,
+def find_similar_pairs(image_paths: List[str],
                        orb_nfeatures: int = 1000,
                        orb_ratio_threshold: float = 0.75,
                        min_good_matches_threshold: int = 30,
                        hash_threshold: int = 5,
                        use_phash: bool = True,
-                       file_extensions: Tuple[str, ...] = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp', '.heic', '.heif'),
-                       signals: Optional[Any] = None, # ★ 型ヒントを Optional[Any] に変更 ★
+                       file_extensions: Optional[Tuple[str, ...]] = None,
+                       signals: Optional[Any] = None,
                        progress_offset: int = 0,
-                       progress_range: int = 100) -> FindSimilarResult:
-    """指定されたディレクトリ内の画像を比較し、類似しているペアを見つけます。"""
+                       progress_range: int = 100,
+                       is_cancelled_func: Optional[Callable[[], bool]] = None) -> FindSimilarResult:
+    """指定された画像パスリスト内の画像を比較し、類似しているペアを見つけます。中断チェック対応。"""
     processing_errors: List[ErrorDict] = []
     file_list_errors: List[ErrorDict] = []
 
     last_progress_emit_time: float = 0.0
-    # ★ emit_progress 内の signals の型ヒントも Any に ★
     def emit_progress(current_value: int, total_value: int, stage_offset: int, stage_range: float, status_prefix: str) -> None:
-        nonlocal last_progress_emit_time
-        progress: int = stage_offset
+        nonlocal last_progress_emit_time; progress: int = stage_offset
         if total_value > 0: progress = stage_offset + int((current_value / total_value) * stage_range)
         status: str = f"{status_prefix} ({current_value}/{total_value})"
         current_time: float = time.time()
-        # signals が None でなく、emit できるオブジェクトかチェック (より安全に)
         if signals and hasattr(signals, 'progress_update') and hasattr(signals, 'status_update') and \
            (current_value == total_value or current_time - last_progress_emit_time > 0.1):
-             signals.progress_update.emit(progress) # type: ignore
-             signals.status_update.emit(status)     # type: ignore
-             last_progress_emit_time = current_time
+             signals.progress_update.emit(progress); signals.status_update.emit(status); last_progress_emit_time = current_time
 
-    if signals and hasattr(signals, 'status_update'): signals.status_update.emit("ファイルリスト取得中...")
-    image_paths: List[str] = []
-    try:
-        filename: str
-        for filename in os.listdir(directory_path):
-            if filename.lower().endswith(file_extensions):
-                full_path: str = os.path.join(directory_path, filename)
-                if os.path.isfile(full_path) and not os.path.islink(full_path): image_paths.append(full_path)
-    except OSError as e: return [], [{'type': 'ディレクトリ読込', 'path': directory_path, 'error': str(e)}], []
-    except Exception as e: return [], [{'type': 'ファイルリスト取得', 'path': directory_path, 'error': str(e)}], []
     if len(image_paths) < 2: return [], [], []
 
     num_images: int = len(image_paths); print(f"{num_images} 個の画像を検出。類似ペア検出を開始します...")
@@ -133,7 +135,9 @@ def find_similar_pairs(directory_path: str,
         orb_comp_range: float = progress_range * 0.80; orb_comp_offset: float = progress_offset + phash_calc_range + phash_comp_range
         hashes: Dict[str, Any] = {}; hash_calculation_count: int = 0; status_prefix_phash_calc: str = "pHash計算中"
         emit_progress(0, num_images, int(progress_offset), int(phash_calc_range), status_prefix_phash_calc)
+        i: int; path: str
         for i, path in enumerate(image_paths):
+            if is_cancelled_func and is_cancelled_func(): return [], processing_errors, []
             hash_value: HashType; error_msg: ErrorMsgType
             hash_value, error_msg = calculate_phash(path)
             if error_msg: processing_errors.append({'type': 'pHash計算', 'path': path, 'error': error_msg})
@@ -148,6 +152,7 @@ def find_similar_pairs(directory_path: str,
             path1: str; path2: str
             for i, path1 in enumerate(hash_paths):
                 for j in range(i + 1, len(hash_paths)):
+                    if is_cancelled_func and is_cancelled_func(): return [], processing_errors, []
                     path2 = hash_paths[j]; hash_comparisons += 1
                     try:
                         distance: int = hashes[path1] - hashes[path2]
@@ -167,6 +172,7 @@ def find_similar_pairs(directory_path: str,
     if total_orb_comparisons > 0:
         path1: str; path2: str
         for path1, path2 in candidate_pairs:
+            if is_cancelled_func and is_cancelled_func(): return similar_pairs, processing_errors, []
             orb_comparisons += 1
             score: Optional[int]; error_msg: ErrorMsgType
             score, error_msg = calculate_orb_similarity_score(path1, path2, n_features=orb_nfeatures, ratio_threshold=orb_ratio_threshold)
@@ -175,5 +181,4 @@ def find_similar_pairs(directory_path: str,
             emit_progress(orb_comparisons, total_orb_comparisons, int(orb_comp_offset), int(orb_comp_range), status_prefix_orb_comp)
     emit_progress(total_orb_comparisons, total_orb_comparisons, int(orb_comp_offset), int(orb_comp_range), status_prefix_orb_comp)
     print(f"類似ペア検出完了。{len(similar_pairs)} 組の類似ペアが見つかりました。{len(processing_errors)} 件のエラーが発生しました。")
-    # 完了時の最終進捗は emit_progress で送信される
-    return similar_pairs, processing_errors, file_list_errors
+    return similar_pairs, processing_errors, []

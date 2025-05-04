@@ -5,9 +5,9 @@ from PySide6.QtWidgets import (QWidget, QTabWidget, QTableWidget, QHeaderView,
                                QStyledItemDelegate, QStyleOptionViewItem)
 from PySide6.QtCore import Qt, Signal, Slot, QPoint, QModelIndex
 from PySide6.QtGui import QAction, QColor
-from typing import List, Dict, Tuple, Optional, Any, Union, Set # ★ typing をインポート ★
+from typing import List, Dict, Tuple, Optional, Any, Union, Set
 
-# ★★★ 修正点: 型エイリアスをクラス定義の前に移動 ★★★
+# 型エイリアス
 BlurResultItem = Dict[str, Union[str, float]]
 SimilarPair = List[Union[str, int]] # [path1: str, path2: str, score: int]
 DuplicateDict = Dict[str, List[str]] # {hash: [path1, path2, ...]}
@@ -19,7 +19,6 @@ ResultsData = Dict[
 ]
 SelectionPaths = Tuple[Optional[str], Optional[str]] # (primary_path, secondary_path)
 FileInfoResult = Tuple[str, str, str] # file_operations からの戻り値型 (仮)
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 # カスタムテーブルアイテムをインポート
 try:
@@ -38,12 +37,35 @@ except ImportError:
     def get_file_info(fp: str) -> FileInfoResult: return "N/A", "N/A", "N/A"
 
 
-class AlternatingRowColorDelegate(QStyledItemDelegate):
-    """テーブルの行の背景色を交互に変えるデリゲート"""
+class AlternatingGroupColorDelegate(QStyledItemDelegate):
+    """テーブルの行の背景色をグループごとに交互に変えるデリゲート"""
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._group_colors: Dict[str, QColor] = {}
+        self._color1 = QColor(Qt.GlobalColor.white)
+        self._color2 = QColor(Qt.GlobalColor.lightGray).lighter(130)
+        self._last_group_hash: Optional[str] = None
+        self._last_color_index: int = 0
+
     def initStyleOption(self, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         super().initStyleOption(option, index)
-        if index.row() % 2 == 0:
-            option.backgroundBrush = QColor(Qt.GlobalColor.lightGray).lighter(130)
+        # グループID列 (列インデックス 4) の UserRole+1 からグループハッシュを取得
+        group_hash_data: Any = index.model().sibling(index.row(), 4, index).data(Qt.ItemDataRole.UserRole+1)
+        group_hash: Optional[str] = str(group_hash_data) if group_hash_data is not None else None
+
+        if group_hash:
+            if group_hash not in self._group_colors:
+                self._last_color_index = 1 - self._last_color_index
+                current_color = self._color1 if self._last_color_index == 0 else self._color2
+                self._group_colors[group_hash] = current_color
+                self._last_group_hash = group_hash
+            option.backgroundBrush = self._group_colors[group_hash]
+
+    def reset_colors(self) -> None:
+        """テーブル更新時に色情報をリセットする"""
+        self._group_colors = {}
+        self._last_group_hash = None
+        self._last_color_index = 0
 
 
 class ResultsTabsWidget(QTabWidget):
@@ -51,7 +73,7 @@ class ResultsTabsWidget(QTabWidget):
     selection_changed = Signal()
     delete_file_requested = Signal(str)
     open_file_requested = Signal(str)
-    delete_duplicates_requested = Signal(str, list) # keep_path: str, delete_paths: List[str]
+    delete_duplicates_requested = Signal(str, list)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -59,14 +81,18 @@ class ResultsTabsWidget(QTabWidget):
         self.similar_table: QTableWidget
         self.duplicate_table: QTableWidget
         self.error_table: QTableWidget
+        self.duplicate_delegate = AlternatingGroupColorDelegate(self)
         self._setup_tabs()
 
     def _setup_tabs(self) -> None:
         """タブとテーブルを作成し、シグナルを接続する"""
         self.blurry_table = self._create_blurry_table(); self.addTab(self.blurry_table, "ブレ画像 (0)")
         self.similar_table = self._create_similar_table(); self.similar_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu); self.similar_table.customContextMenuRequested.connect(self._show_similar_table_context_menu); self.addTab(self.similar_table, "類似ペア (0)")
-        self.duplicate_table = self._create_duplicate_table(); self.duplicate_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu); self.duplicate_table.customContextMenuRequested.connect(self._show_duplicate_table_context_menu); self.addTab(self.duplicate_table, "重複ファイル (0)")
+        self.duplicate_table = self._create_duplicate_table(); self.duplicate_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu); self.duplicate_table.customContextMenuRequested.connect(self._show_duplicate_table_context_menu);
+        self.duplicate_table.setItemDelegate(self.duplicate_delegate)
+        self.addTab(self.duplicate_table, "重複ファイル (0)")
         self.error_table = self._create_error_table(); self.addTab(self.error_table, "エラー (0)")
+
         self.blurry_table.itemSelectionChanged.connect(self.selection_changed.emit); self.similar_table.itemSelectionChanged.connect(self.selection_changed.emit); self.duplicate_table.itemSelectionChanged.connect(self.selection_changed.emit); self.error_table.itemSelectionChanged.connect(self.selection_changed.emit)
         self.currentChanged.connect(lambda index: self.selection_changed.emit())
 
@@ -93,55 +119,61 @@ class ResultsTabsWidget(QTabWidget):
     # --- データ投入メソッド ---
     @Slot(list, list, dict, list)
     def populate_results(self, blurry_results: List[BlurResultItem], similar_results: List[SimilarPair], duplicate_results: DuplicateDict, scan_errors: List[ErrorDict]) -> None:
-        self._populate_blurry_table(blurry_results); self._populate_similar_table(similar_results); self._populate_duplicate_table(duplicate_results); self._populate_error_table(scan_errors)
-        self.setTabText(0, f"ブレ画像 ({self.blurry_table.rowCount()})"); self.setTabText(1, f"類似ペア ({self.similar_table.rowCount()})"); self.setTabText(2, f"重複ファイル ({self.duplicate_table.rowCount()})"); self.setTabText(3, f"エラー ({self.error_table.rowCount()})")
+        self.duplicate_delegate.reset_colors()
+        self._populate_table(self.blurry_table, blurry_results, self._create_blurry_row_items)
+        self._populate_table(self.similar_table, similar_results, self._create_similar_row_items)
+        self._populate_table(self.duplicate_table, self._flatten_duplicates(duplicate_results), self._create_duplicate_row_items)
+        self._populate_table(self.error_table, scan_errors, self._create_error_row_items)
+        self._update_tab_texts()
 
-    def _populate_blurry_table(self, blurry_results: List[BlurResultItem]) -> None:
-        self.blurry_table.setSortingEnabled(False); self.blurry_table.setRowCount(len(blurry_results))
-        row: int; data: BlurResultItem
-        for row, data in enumerate(blurry_results):
-            path: str = data['path']; score: float = float(data['score'])
-            file_size: str; mod_time: str; dimensions: str; file_size, mod_time, dimensions = get_file_info(path)
-            chk_item = QTableWidgetItem(); chk_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled); chk_item.setCheckState(Qt.CheckState.Unchecked); chk_item.setData(Qt.ItemDataRole.UserRole, path)
-            name_item = QTableWidgetItem(os.path.basename(path)); size_item = FileSizeTableWidgetItem(file_size); date_item = DateTimeTableWidgetItem(mod_time); dim_item = ResolutionTableWidgetItem(dimensions); score_item = NumericTableWidgetItem(f"{score:.4f}"); score_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); path_item = QTableWidgetItem(path)
-            self.blurry_table.setItem(row, 0, chk_item); self.blurry_table.setItem(row, 1, name_item); self.blurry_table.setItem(row, 2, size_item); self.blurry_table.setItem(row, 3, date_item); self.blurry_table.setItem(row, 4, dim_item); self.blurry_table.setItem(row, 5, score_item); self.blurry_table.setItem(row, 6, path_item)
-        self.blurry_table.setSortingEnabled(True)
-    def _populate_similar_table(self, similar_results: List[SimilarPair]) -> None:
-        self.similar_table.setSortingEnabled(False); self.similar_table.setRowCount(len(similar_results))
-        row: int; path1: str; path2: str; score: int
-        for row, (path1, path2, score) in enumerate(similar_results):
-            file_size1: str; mod_time1: str; dimensions1: str; file_size1, mod_time1, dimensions1 = get_file_info(path1)
-            name1_item = QTableWidgetItem(os.path.basename(path1)); name1_item.setData(Qt.ItemDataRole.UserRole, (path1, path2))
-            size1_item = FileSizeTableWidgetItem(file_size1); date1_item = DateTimeTableWidgetItem(mod_time1); dim1_item = ResolutionTableWidgetItem(dimensions1); name2_item = QTableWidgetItem(os.path.basename(path2)); score_item = NumericTableWidgetItem(str(score)); score_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); path1_item = QTableWidgetItem(path1)
-            self.similar_table.setItem(row, 0, name1_item); self.similar_table.setItem(row, 1, size1_item); self.similar_table.setItem(row, 2, date1_item); self.similar_table.setItem(row, 3, dim1_item); self.similar_table.setItem(row, 4, name2_item); self.similar_table.setItem(row, 5, score_item); self.similar_table.setItem(row, 6, path1_item)
-        self.similar_table.setSortingEnabled(True)
-    def _populate_duplicate_table(self, duplicate_results: DuplicateDict) -> None:
-        self.duplicate_table.setSortingEnabled(False); self.duplicate_table.setRowCount(0); current_row: int = 0; group_id_counter: int = 1
-        group_hash: str; paths: List[str]
-        for group_hash, paths in duplicate_results.items():
+    def _populate_table(self, table: QTableWidget, data: List[Any], item_creator_func) -> None:
+        table.setSortingEnabled(False); table.setRowCount(len(data))
+        for row, row_data in enumerate(data):
+            items: List[QTableWidgetItem] = item_creator_func(row_data)
+            for col, item in enumerate(items): table.setItem(row, col, item)
+        table.setSortingEnabled(True)
+
+    def _create_blurry_row_items(self, data: BlurResultItem) -> List[QTableWidgetItem]:
+        path: str = data['path']; score: float = float(data['score'])
+        file_size, mod_time, dimensions = get_file_info(path)
+        chk_item = QTableWidgetItem(); chk_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled); chk_item.setCheckState(Qt.CheckState.Unchecked); chk_item.setData(Qt.ItemDataRole.UserRole, path)
+        name_item = QTableWidgetItem(os.path.basename(path)); size_item = FileSizeTableWidgetItem(file_size); date_item = DateTimeTableWidgetItem(mod_time); dim_item = ResolutionTableWidgetItem(dimensions); score_item = NumericTableWidgetItem(f"{score:.4f}"); score_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); path_item = QTableWidgetItem(path)
+        return [chk_item, name_item, size_item, date_item, dim_item, score_item, path_item]
+    def _create_similar_row_items(self, data: SimilarPair) -> List[QTableWidgetItem]:
+        path1: str = str(data[0]); path2: str = str(data[1]); score: int = int(data[2])
+        file_size1, mod_time1, dimensions1 = get_file_info(path1)
+        name1_item = QTableWidgetItem(os.path.basename(path1)); name1_item.setData(Qt.ItemDataRole.UserRole, (path1, path2))
+        size1_item = FileSizeTableWidgetItem(file_size1); date1_item = DateTimeTableWidgetItem(mod_time1); dim1_item = ResolutionTableWidgetItem(dimensions1); name2_item = QTableWidgetItem(os.path.basename(path2)); score_item = NumericTableWidgetItem(str(score)); score_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); path1_item = QTableWidgetItem(path1)
+        return [name1_item, size1_item, date1_item, dim1_item, name2_item, score_item, path1_item]
+    def _flatten_duplicates(self, duplicate_results: DuplicateDict) -> List[Dict[str, Any]]:
+        flat_list: List[Dict[str, Any]] = []; group_id_counter: int = 1
+        sorted_groups = sorted(duplicate_results.items(), key=lambda item: item[1][0] if item[1] else "")
+        for group_hash, paths in sorted_groups:
             if len(paths) < 2: continue
             display_group_id: str = f"G{group_id_counter}"
-            i: int; path: str
-            for i, path in enumerate(paths):
-                file_size: str; mod_time: str; dimensions: str; file_size, mod_time, dimensions = get_file_info(path)
-                chk_item = QTableWidgetItem(); chk_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled); chk_item.setCheckState(Qt.CheckState.Checked if i > 0 else Qt.CheckState.Unchecked); chk_item.setData(Qt.ItemDataRole.UserRole, {'path': path, 'group_hash': group_hash})
-                name_item = QTableWidgetItem(os.path.basename(path)); size_item = FileSizeTableWidgetItem(file_size); date_item = DateTimeTableWidgetItem(mod_time); group_item = QTableWidgetItem(display_group_id); group_item.setData(Qt.ItemDataRole.UserRole+1, group_hash); path_item = QTableWidgetItem(path)
-                self.duplicate_table.insertRow(current_row); self.duplicate_table.setItem(current_row, 0, chk_item); self.duplicate_table.setItem(current_row, 1, name_item); self.duplicate_table.setItem(current_row, 2, size_item); self.duplicate_table.setItem(current_row, 3, date_item); self.duplicate_table.setItem(current_row, 4, group_item); self.duplicate_table.setItem(current_row, 5, path_item); current_row += 1
+            sorted_paths = sorted(paths)
+            for i, path in enumerate(sorted_paths): flat_list.append({'path': path, 'group_hash': group_hash, 'display_group_id': display_group_id, 'is_first': i == 0})
             group_id_counter += 1
-        self.duplicate_table.setSortingEnabled(True)
-    def _populate_error_table(self, scan_errors: List[ErrorDict]) -> None:
-        self.error_table.setSortingEnabled(False); self.error_table.setRowCount(len(scan_errors))
-        row: int; err_data: ErrorDict
-        for row, err_data in enumerate(scan_errors):
-            err_type: str = err_data.get('type', '不明'); path_display: str = err_data.get('path', 'N/A'); error_msg: str = err_data.get('error', '詳細不明')
-            type_item = QTableWidgetItem(err_type); path_item = QTableWidgetItem(path_display); path_item.setData(Qt.ItemDataRole.UserRole, err_data); msg_item = QTableWidgetItem(error_msg); msg_item.setToolTip(error_msg)
-            self.error_table.setItem(row, 0, type_item); self.error_table.setItem(row, 1, path_item); self.error_table.setItem(row, 2, msg_item)
-        self.error_table.setSortingEnabled(True)
+        return flat_list
+    def _create_duplicate_row_items(self, data: Dict[str, Any]) -> List[QTableWidgetItem]:
+        path: str = data['path']; group_hash: str = data['group_hash']; display_group_id: str = data['display_group_id']; is_first: bool = data['is_first']
+        file_size, mod_time, dimensions = get_file_info(path)
+        chk_item = QTableWidgetItem(); chk_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled); chk_item.setCheckState(Qt.CheckState.Unchecked if is_first else Qt.CheckState.Checked); chk_item.setData(Qt.ItemDataRole.UserRole, {'path': path, 'group_hash': group_hash})
+        name_item = QTableWidgetItem(os.path.basename(path)); size_item = FileSizeTableWidgetItem(file_size); date_item = DateTimeTableWidgetItem(mod_time); group_item = QTableWidgetItem(display_group_id); group_item.setData(Qt.ItemDataRole.UserRole+1, group_hash); path_item = QTableWidgetItem(path)
+        return [chk_item, name_item, size_item, date_item, group_item, path_item]
+    def _create_error_row_items(self, data: ErrorDict) -> List[QTableWidgetItem]:
+        err_type: str = data.get('type', '不明'); path_display: str = data.get('path', 'N/A'); error_msg: str = data.get('error', '詳細不明')
+        type_item = QTableWidgetItem(err_type); path_item = QTableWidgetItem(path_display); path_item.setData(Qt.ItemDataRole.UserRole, data); msg_item = QTableWidgetItem(error_msg); msg_item.setToolTip(error_msg)
+        return [type_item, path_item, msg_item]
+
+    def _update_tab_texts(self) -> None:
+        self.setTabText(0, f"ブレ画像 ({self.blurry_table.rowCount()})"); self.setTabText(1, f"類似ペア ({self.similar_table.rowCount()})"); self.setTabText(2, f"重複ファイル ({self.duplicate_table.rowCount()})"); self.setTabText(3, f"エラー ({self.error_table.rowCount()})")
 
     @Slot()
     def clear_results(self) -> None:
         self.blurry_table.setRowCount(0); self.similar_table.setRowCount(0); self.duplicate_table.setRowCount(0); self.error_table.setRowCount(0)
-        self.setTabText(0, "ブレ画像 (0)"); self.setTabText(1, "類似ペア (0)"); self.setTabText(2, "重複ファイル (0)"); self.setTabText(3, "エラー (0)")
+        self._update_tab_texts()
+        self.duplicate_delegate.reset_colors()
 
     # --- 選択状態取得メソッド ---
     def get_selected_blurry_paths(self) -> List[str]:
@@ -188,14 +220,37 @@ class ResultsTabsWidget(QTabWidget):
         self.error_table.clearSelection(); self.selection_changed.emit()
 
     # --- テーブルから削除された項目を反映するメソッド ---
-    def remove_items_by_paths(self, deleted_paths_set: Set[str]) -> None: # 引数の型を Set[str] に
+    def remove_items_by_paths(self, deleted_paths_set: Set[str]) -> None:
         if not deleted_paths_set: return
-        row: int; item: Optional[QTableWidgetItem]; path: Optional[str]; path_data: Any; data: Any; err_data: Any; p1n: Optional[str]; p2n: Optional[str]; err_path_norm: Optional[str]; et: Optional[str]; ep: Optional[str]
-        rows_to_remove_blurry: List[int] = [row for row in range(self.blurry_table.rowCount()) if (item := self.blurry_table.item(row, 0)) and (path := item.data(Qt.ItemDataRole.UserRole)) and os.path.normpath(path) in deleted_paths_set]; [self.blurry_table.removeRow(row) for row in sorted(rows_to_remove_blurry, reverse=True)]
-        rows_to_remove_similar: List[int] = [row for row in range(self.similar_table.rowCount()) if (item := self.similar_table.item(row, 0)) and (path_data := item.data(Qt.ItemDataRole.UserRole)) and isinstance(path_data, tuple) and len(path_data) == 2 and ((p1n := os.path.normpath(path_data[0]) if path_data[0] else None) and p1n in deleted_paths_set or (p2n := os.path.normpath(path_data[1]) if path_data[1] else None) and p2n in deleted_paths_set)]; [self.similar_table.removeRow(row) for row in sorted(list(set(rows_to_remove_similar)), reverse=True)]
-        rows_to_remove_duplicate: List[int] = [row for row in range(self.duplicate_table.rowCount()) if (item := self.duplicate_table.item(row, 0)) and (data := item.data(Qt.ItemDataRole.UserRole)) and isinstance(data, dict) and (path := data.get('path')) and os.path.normpath(path) in deleted_paths_set]; [self.duplicate_table.removeRow(row) for row in sorted(rows_to_remove_duplicate, reverse=True)]
-        rows_to_remove_error: List[int] = [row for row in range(self.error_table.rowCount()) if (item := self.error_table.item(row, 1)) and (err_data := item.data(Qt.ItemDataRole.UserRole)) and isinstance(err_data, dict) and (((et := err_data.get('type')) in ['ブレ検出', 'pHash計算', 'ファイル読込/ハッシュ計算', 'ファイルサイズ取得'] and (ep := err_data.get('path')) and os.path.normpath(ep) in deleted_paths_set) or (et in ['ORB比較', 'pHash比較'] and ((p1n := os.path.normpath(err_data['path1']) if err_data.get('path1') else None) and p1n in deleted_paths_set or (p2n := os.path.normpath(err_data['path2']) if err_data.get('path2') else None) and p2n in deleted_paths_set)))]; [self.error_table.removeRow(row) for row in sorted(rows_to_remove_error, reverse=True)]
-        self.setTabText(0, f"ブレ画像 ({self.blurry_table.rowCount()})"); self.setTabText(1, f"類似ペア ({self.similar_table.rowCount()})"); self.setTabText(2, f"重複ファイル ({self.duplicate_table.rowCount()})"); self.setTabText(3, f"エラー ({self.error_table.rowCount()})")
+        self._remove_items_from_table(self.blurry_table, deleted_paths_set, self._check_blurry_path)
+        self._remove_items_from_table(self.similar_table, deleted_paths_set, self._check_similar_paths)
+        self._remove_items_from_table(self.duplicate_table, deleted_paths_set, self._check_duplicate_path)
+        self._remove_items_from_table(self.error_table, deleted_paths_set, self._check_error_paths)
+        self._update_tab_texts()
+        self.duplicate_delegate.reset_colors()
+
+    def _remove_items_from_table(self, table: QTableWidget, deleted_paths: Set[str], check_func) -> None:
+        rows_to_remove: List[int] = [row for row in range(table.rowCount()) if check_func(table, row, deleted_paths)]; row: int
+        for row in sorted(rows_to_remove, reverse=True): table.removeRow(row)
+
+    def _check_blurry_path(self, table: QTableWidget, row: int, deleted_paths: Set[str]) -> bool:
+        item: Optional[QTableWidgetItem] = table.item(row, 0); path: Optional[str] = item.data(Qt.ItemDataRole.UserRole) if item else None; return bool(path and os.path.normpath(path) in deleted_paths)
+    def _check_similar_paths(self, table: QTableWidget, row: int, deleted_paths: Set[str]) -> bool:
+        item: Optional[QTableWidgetItem] = table.item(row, 0); path_data: Any = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if isinstance(path_data, tuple) and len(path_data) == 2: p1n: Optional[str] = os.path.normpath(path_data[0]) if path_data[0] else None; p2n: Optional[str] = os.path.normpath(path_data[1]) if path_data[1] else None; return bool((p1n and p1n in deleted_paths) or (p2n and p2n in deleted_paths))
+        return False
+    def _check_duplicate_path(self, table: QTableWidget, row: int, deleted_paths: Set[str]) -> bool:
+        item: Optional[QTableWidgetItem] = table.item(row, 0); data: Any = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if isinstance(data, dict) and 'path' in data: path: Optional[str] = data.get('path'); return bool(path and os.path.normpath(path) in deleted_paths)
+        return False
+    def _check_error_paths(self, table: QTableWidget, row: int, deleted_paths: Set[str]) -> bool:
+        item: Optional[QTableWidgetItem] = table.item(row, 1); err_data: Any = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if isinstance(err_data, dict):
+            et: Optional[str] = err_data.get('type'); ep: Optional[str] = err_data.get('path'); ep1: Optional[str] = err_data.get('path1'); ep2: Optional[str] = err_data.get('path2')
+            ep_norm: Optional[str] = os.path.normpath(ep) if ep else None; p1n: Optional[str] = os.path.normpath(ep1) if ep1 else None; p2n: Optional[str] = os.path.normpath(ep2) if ep2 else None
+            if et in ['ブレ検出', 'pHash計算', 'ファイル読込/ハッシュ計算', 'ファイルサイズ取得'] and ep_norm and ep_norm in deleted_paths: return True
+            elif et in ['ORB比較', 'pHash比較'] and ((p1n and p1n in deleted_paths) or (p2n and p2n in deleted_paths)): return True
+        return False
 
     # --- コンテキストメニュー処理 ---
     @Slot(QPoint)
@@ -222,49 +277,78 @@ class ResultsTabsWidget(QTabWidget):
         context_menu.addAction(action_delete_this); context_menu.addAction(action_keep_this); context_menu.addSeparator(); context_menu.addAction(action_open_this)
         context_menu.exec(self.duplicate_table.mapToGlobal(pos))
 
-    # ★★★ データ取得メソッドを追加 ★★★
-    def get_results_data(self) -> ResultsData: # 戻り値の型ヒント
+    # --- データ取得メソッド ---
+    def get_results_data(self) -> ResultsData:
         """現在のテーブルデータを辞書形式で取得する"""
-        blurry_data: List[BlurResultItem] = []
-        row: int
+        return {
+            'blurry': self._get_blurry_data(),
+            'similar': self._get_similar_data(),
+            'duplicates': self._get_duplicate_data(),
+            'errors': self._get_error_data()
+        }
+
+    def _get_blurry_data(self) -> List[BlurResultItem]:
+        """ブレ画像テーブルからデータを取得"""
+        data: List[BlurResultItem] = []; row: int
         for row in range(self.blurry_table.rowCount()):
             chk_item: Optional[QTableWidgetItem] = self.blurry_table.item(row, 0)
             score_item: Optional[QTableWidgetItem] = self.blurry_table.item(row, 5)
             if chk_item and score_item:
                 path: Optional[str] = chk_item.data(Qt.ItemDataRole.UserRole)
-                try: score: float = float(score_item.text())
-                except (ValueError, TypeError): print(f"警告: ブレテーブルスコア変換エラー (行 {row})"); continue
-                if path: blurry_data.append({'path': path, 'score': score})
+                # ★★★ 修正箇所: try-except ブロックのインデント修正 ★★★
+                try:
+                    score: float = float(score_item.text())
+                    if path:
+                        data.append({'path': path, 'score': score})
+                except (ValueError, TypeError):
+                    print(f"警告: ブレテーブルスコア変換エラー (行 {row})")
+                    continue # エラーの場合はスキップ
+                # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        return data
 
-        similar_data: List[SimilarPair] = []
+    def _get_similar_data(self) -> List[SimilarPair]:
+        """類似ペアテーブルからデータを取得"""
+        data: List[SimilarPair] = []; row: int
         for row in range(self.similar_table.rowCount()):
             item: Optional[QTableWidgetItem] = self.similar_table.item(row, 0)
             score_item: Optional[QTableWidgetItem] = self.similar_table.item(row, 5)
             if item and score_item:
                 path_data: Any = item.data(Qt.ItemDataRole.UserRole)
-                try: score: int = int(score_item.text())
-                except (ValueError, TypeError): print(f"警告: 類似ペアスコア変換エラー (行 {row})"); continue
-                if isinstance(path_data, tuple) and len(path_data) == 2:
-                    similar_data.append([str(path_data[0]), str(path_data[1]), score])
+                # ★★★ 修正箇所: try-except ブロックのインデント修正 ★★★
+                try:
+                    score: int = int(score_item.text())
+                    if isinstance(path_data, tuple) and len(path_data) == 2:
+                        p1 = str(path_data[0]) if path_data[0] else ""
+                        p2 = str(path_data[1]) if path_data[1] else ""
+                        data.append([p1, p2, score])
+                except (ValueError, TypeError):
+                     print(f"警告: 類似ペアスコア変換エラー (行 {row})")
+                     continue # エラーの場合はスキップ
+                # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        return data
 
-        duplicate_data: DuplicateDict = {}
+    def _get_duplicate_data(self) -> DuplicateDict:
+        """重複ファイルテーブルからデータを取得"""
+        data: DuplicateDict = {}; row: int
         for row in range(self.duplicate_table.rowCount()):
             chk_item: Optional[QTableWidgetItem] = self.duplicate_table.item(row, 0)
             if chk_item:
-                data: Any = chk_item.data(Qt.ItemDataRole.UserRole)
-                if isinstance(data, dict) and 'path' in data and 'group_hash' in data:
-                    group_hash: str = data['group_hash']; path: str = data['path']
-                    if group_hash not in duplicate_data: duplicate_data[group_hash] = []
-                    duplicate_data[group_hash].append(path)
-
-        error_data: List[ErrorDict] = []
+                item_data: Any = chk_item.data(Qt.ItemDataRole.UserRole)
+                if isinstance(item_data, dict) and 'path' in item_data and 'group_hash' in item_data:
+                    group_hash: str = item_data['group_hash']; path: str = item_data['path']
+                    if group_hash not in data: data[group_hash] = []
+                    data[group_hash].append(path)
+        return data
+    def _get_error_data(self) -> List[ErrorDict]:
+        """エラーテーブルからデータを取得"""
+        data: List[ErrorDict] = []; row: int
         for row in range(self.error_table.rowCount()):
             item: Optional[QTableWidgetItem] = self.error_table.item(row, 1)
             if item:
                 err_dict: Any = item.data(Qt.ItemDataRole.UserRole)
                 if isinstance(err_dict, dict):
-                    # 型チェックをより厳密にする場合はここで行う
-                    error_data.append(err_dict) # type: ignore
-
-        return {'blurry': blurry_data, 'similar': similar_data, 'duplicates': duplicate_data, 'errors': error_data}
+                    # 必要であればここでさらに厳密な型チェック
+                    error_data_item: ErrorDict = {k: str(v) for k, v in err_dict.items()} # 簡単な型変換
+                    data.append(error_data_item)
+        return data
 
