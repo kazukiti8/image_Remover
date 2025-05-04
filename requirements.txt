@@ -1,6 +1,15 @@
-# requirements.txt
-PySide6>=6.6.0,<6.8.0   # GUIツールキット (バージョンは適宜調整)
-numpy==2.2.5          # 数値計算ライブラリ (OpenCVが依存)
-opencv-python==4.11.0.86 # 画像処理ライブラリ (FFT, ORBなど)
-Send2Trash==1.8.3      # ゴミ箱への移動用ライブラリ
-Pillow==11.2.1         # 画像処理補助ライブラリ (任意だが便利)
+altgraph==0.17.4
+numpy==2.2.5
+opencv-python==4.11.0.86
+packaging==25.0
+pefile==2023.2.7
+pillow==11.2.1
+pyinstaller==6.13.0
+pyinstaller-hooks-contrib==2025.4
+PySide6==6.9.0
+PySide6_Addons==6.9.0
+PySide6_Essentials==6.9.0
+pywin32-ctypes==0.2.3
+Send2Trash==1.8.3
+setuptools==80.3.0
+shiboken6==6.9.0

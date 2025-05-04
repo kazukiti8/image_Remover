@@ -5,22 +5,21 @@ import time
 import itertools
 import cv2
 import numpy as np
-import json
+# import json # ← config_handler に移動したので不要
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTabWidget, QFrame,
-    QFileDialog, QProgressBar, QTableWidget, QTableWidgetItem, # ★ QTableWidgetItem をインポート ★
+    QFileDialog, QProgressBar, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QMessageBox
 )
 from PySide6.QtCore import Qt, QRunnable, QThreadPool, Signal, QObject, Slot
 from PySide6.QtGui import QImage, QPixmap, QCloseEvent, QKeyEvent, QMouseEvent
 
-# --- send2trash をインポート ---
-try:
-    import send2trash
-except ImportError:
-    print("エラー: send2trash ライブラリが見つかりません。`pip install Send2Trash` を実行してください。")
-    send2trash = None
+# --- send2trash は file_operations でインポート ---
+# try:
+#     import send2trash
+# except ImportError:
+#     send2trash = None
 
 # --- コアロジックの関数をインポート ---
 try:
@@ -41,18 +40,29 @@ except ImportError:
     print("エラー: settings_dialog モジュールが見つかりません。")
     SettingsDialog = None
 
-# === ★ 数値ソート用 QTableWidgetItem サブクラス定義 ★ ===
+# --- ★ ユーティリティ関数をインポート ★ ---
+try:
+    from utils.config_handler import load_settings, save_settings, DEFAULT_SETTINGS
+    from utils.file_operations import get_file_info, delete_files_to_trash, open_file_external
+except ImportError:
+    print("エラー: utils パッケージまたはその中のモジュールが見つかりません。")
+    # ダミー関数やデフォルト値を設定 (アプリケーションが最低限動作するように)
+    DEFAULT_SETTINGS = {'blur_threshold': 0.8,'orb_nfeatures': 1500,'orb_ratio_threshold': 0.7,'min_good_matches': 40}
+    def load_settings(): return DEFAULT_SETTINGS.copy()
+    def save_settings(s): print("警告: 設定保存機能が無効です。"); return False
+    def get_file_info(fp): return "N/A", "N/A", "N/A"
+    def delete_files_to_trash(fps, p=None): print("警告: 削除機能が無効です。"); return 0, ["削除機能が無効です"], set()
+    def open_file_external(fp, p=None): print("警告: ファイルを開く機能が無効です。")
+
+
+# === 数値ソート用 QTableWidgetItem サブクラス定義 (変更なし) ===
 class NumericTableWidgetItem(QTableWidgetItem):
-    """数値を正しくソートするための QTableWidgetItem サブクラス"""
     def __lt__(self, other):
-        # アイテムのテキストを数値（浮動小数点数）に変換して比較
         try:
-            # 空白やエラー文字列を考慮
             self_value = float(self.text()) if self.text() else -float('inf')
             other_value = float(other.text()) if other.text() else -float('inf')
             return self_value < other_value
         except (ValueError, TypeError):
-            # 数値に変換できない場合は、デフォルトの文字列比較にフォールバック
             return super().__lt__(other)
 
 # === バックグラウンド処理用のクラス定義 (変更なし) ===
@@ -135,7 +145,7 @@ class ScanWorker(QRunnable):
 
 # === メインウィンドウクラス ===
 class ImageCleanerWindow(QMainWindow):
-    SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".image_cleaner_settings.json")
+    # SETTINGS_FILE は config_handler で定義されているので不要
 
     def __init__(self):
         super().__init__()
@@ -143,17 +153,13 @@ class ImageCleanerWindow(QMainWindow):
         self.setGeometry(100, 100, 950, 700)
 
         self.threadpool = QThreadPool()
-        self.default_settings = {
-            'blur_threshold': 0.80,
-            'orb_nfeatures': 1500,
-            'orb_ratio_threshold': 0.70,
-            'min_good_matches': 40
-        }
-        self.current_settings = self.default_settings.copy()
+        # --- ★ 設定値は load_settings で初期化 ---
+        self.current_settings = load_settings() # ★ 起動時に設定読み込み ★
+
         self.left_preview_path = None
         self.right_preview_path = None
         self._setup_ui()
-        self._load_settings()
+        # self._load_settings() # ← __init__ の最初で呼ぶように変更
 
     def _setup_ui(self):
         """UIウィジェットの作成とレイアウトを行う"""
@@ -170,31 +176,17 @@ class ImageCleanerWindow(QMainWindow):
         action_layout = QHBoxLayout(); self.delete_button = QPushButton("選択した項目をゴミ箱へ移動"); self.delete_button.clicked.connect(self.delete_selected_items); self.select_all_blurry_button = QPushButton("全選択(ブレ)"); self.select_all_blurry_button.clicked.connect(self.select_all_blurry); self.select_all_similar_button = QPushButton("全選択(類似ペア)"); self.select_all_similar_button.clicked.connect(self.select_all_similar); self.deselect_all_button = QPushButton("全選択解除"); self.deselect_all_button.clicked.connect(self.deselect_all); action_layout.addWidget(self.delete_button); action_layout.addStretch(); action_layout.addWidget(self.select_all_blurry_button); action_layout.addWidget(self.select_all_similar_button); action_layout.addWidget(self.deselect_all_button); self.main_layout.addLayout(action_layout)
 
 
-    # --- 設定読み込み/保存メソッド (変更なし) ---
-    def _load_settings(self):
-        # (変更なし - 前回の応答と同じコード)
-        if os.path.exists(self.SETTINGS_FILE):
-            try:
-                with open(self.SETTINGS_FILE, 'r', encoding='utf-8') as f: loaded_settings = json.load(f)
-                for key in self.default_settings:
-                    if key in loaded_settings:
-                        if isinstance(loaded_settings[key], type(self.default_settings[key])): self.current_settings[key] = loaded_settings[key]
-                        else: print(f"警告: 設定ファイルの値の型が不正です ({key})。デフォルト値を使用します。")
-                print(f"設定ファイルを読み込みました: {self.SETTINGS_FILE}")
-            except (json.JSONDecodeError, TypeError, ValueError, OSError) as e: print(f"警告: 設定ファイルの読み込みに失敗しました ({e})。デフォルト設定を使用します。"); self.current_settings = self.default_settings.copy()
-        else: print("設定ファイルが見つかりません。デフォルト設定を使用します。")
+    # --- ★ 設定読み込み/保存メソッドを削除 ★ ---
+    # def _load_settings(self): ... (削除)
+    # def _save_settings(self): ... (削除)
 
-    def _save_settings(self):
-        # (変更なし - 前回の応答と同じコード)
-        try:
-            with open(self.SETTINGS_FILE, 'w', encoding='utf-8') as f: json.dump(self.current_settings, f, ensure_ascii=False, indent=4)
-            print(f"設定を保存しました: {self.SETTINGS_FILE}")
-        except OSError as e: print(f"警告: 設定ファイルの保存に失敗しました ({e})。"); QMessageBox.warning(self, "保存エラー", f"設定ファイルの保存に失敗しました。\n{e}")
-
+    # --- ★ closeEvent で save_settings を呼び出すように変更 ★ ---
     def closeEvent(self, event: QCloseEvent):
-        # (変更なし)
-        self._save_settings()
-        event.accept()
+        """ウィンドウが閉じられるときに設定を保存する"""
+        if not save_settings(self.current_settings): # ★ utils の関数呼び出し ★
+             # 保存失敗時のメッセージ (任意)
+             QMessageBox.warning(self, "保存エラー", "設定ファイルの保存に失敗しました。")
+        event.accept() # ウィンドウを閉じる
 
     # --- ボタンに対応する関数 (スロット) ---
     def select_directory(self):
@@ -222,66 +214,53 @@ class ImageCleanerWindow(QMainWindow):
 
     @Slot(list, list)
     def populate_results(self, blurry_results, similar_results):
-        """結果を受け取り、テーブルを更新するスロット (数値ソート対応)"""
+        """結果を受け取り、テーブルを更新するスロット (★ファイル情報取得をutils呼び出しに変更★)"""
         print(f"結果受信: ブレ画像={len(blurry_results)}, 類似ペア={len(similar_results)}")
 
-        # --- ブレ画像テーブルの更新 (★スコア列に NumericTableWidgetItem を使用★) ---
+        # --- ブレ画像テーブルの更新 ---
         self.blurry_table.setSortingEnabled(False)
         self.blurry_table.setRowCount(len(blurry_results))
         for row, data in enumerate(blurry_results):
             path = data['path']
             score = data['score']
-            dimensions = "N/A"
-            try: img = cv2.imread(path); (img is not None) and (h := img.shape[0], w := img.shape[1], dimensions := f"{w}x{h}")
-            except Exception as e: print(f"警告: ブレ画像の解像度取得エラー ({path}): {e}")
+            # ★ utils からファイル情報取得 ★
+            file_size, mod_time, dimensions = get_file_info(path) # サイズと日時は使わないが取得
 
             chk_item = QTableWidgetItem(); chk_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled); chk_item.setCheckState(Qt.CheckState.Unchecked); chk_item.setData(Qt.ItemDataRole.UserRole, path)
             thumb_item = QTableWidgetItem("[T]")
             name_item = QTableWidgetItem(os.path.basename(path))
             path_item = QTableWidgetItem(path)
-            dim_item = QTableWidgetItem(dimensions)
-            # ★ スコアアイテムを NumericTableWidgetItem で作成 ★
-            score_item = NumericTableWidgetItem(f"{score:.4f}")
+            dim_item = QTableWidgetItem(dimensions) # ★ 解像度アイテム ★
+            score_item = NumericTableWidgetItem(f"{score:.4f}") # 数値ソート用アイテム
             score_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
             self.blurry_table.setItem(row, 0, chk_item)
             self.blurry_table.setItem(row, 1, thumb_item)
             self.blurry_table.setItem(row, 2, name_item)
             self.blurry_table.setItem(row, 3, path_item)
-            self.blurry_table.setItem(row, 4, dim_item)
-            self.blurry_table.setItem(row, 5, score_item) # ★ ここで設定 ★
+            self.blurry_table.setItem(row, 4, dim_item)   # 4列目に解像度
+            self.blurry_table.setItem(row, 5, score_item) # 5列目にスコア
         self.blurry_table.setSortingEnabled(True)
 
-        # --- 類似ペアテーブルの更新 (★類似度列に NumericTableWidgetItem を使用★) ---
+        # --- 類似ペアテーブルの更新 ---
         self.similar_table.setSortingEnabled(False)
         display_data = []; processed_pairs = set()
         for p1, p2, score in similar_results: pair_key = tuple(sorted((p1, p2))); (pair_key not in processed_pairs) and (display_data.append({'primary_path': p1, 'similar_path': p2, 'score': score}), processed_pairs.add(pair_key))
         self.similar_table.setRowCount(len(display_data))
         for row, data in enumerate(display_data):
             primary_path = data['primary_path']; similar_path = data['similar_path']; score = data['score']
-            file_size = "N/A"; mod_time = "N/A"; dimensions = "N/A"
-            try:
-                stat_info = os.stat(primary_path); fb = stat_info.st_size; file_size = f"{fb} B" if fb < 1024 else f"{fb/1024:.1f} KB" if fb < 1024**2 else f"{fb/(1024**2):.1f} MB"; mod_time = time.strftime('%Y/%m/%d %H:%M', time.localtime(stat_info.st_mtime))
-                img = cv2.imread(primary_path); (img is not None) and (h := img.shape[0], w := img.shape[1], dimensions := f"{w}x{h}")
-            except Exception as e: print(f"警告: ファイル情報/解像度取得エラー ({primary_path}): {e}")
+            # ★ utils からファイル情報取得 ★
+            file_size, mod_time, dimensions = get_file_info(primary_path)
 
             thumb_item = QTableWidgetItem("[T]"); thumb_item.setData(Qt.ItemDataRole.UserRole, (primary_path, similar_path))
             name_item = QTableWidgetItem(os.path.basename(primary_path))
-            size_item = QTableWidgetItem(file_size) # サイズも数値ソートしたい場合は Numeric にする（要単位変換）
-            date_item = QTableWidgetItem(mod_time) # 日時もソート可能にするには工夫が必要
-            dim_item = QTableWidgetItem(dimensions)
+            size_item = QTableWidgetItem(file_size) # ★ 取得したサイズ ★
+            date_item = QTableWidgetItem(mod_time)  # ★ 取得した日時 ★
+            dim_item = QTableWidgetItem(dimensions) # ★ 取得した解像度 ★
             sim_name_item = QTableWidgetItem(os.path.basename(similar_path))
-            # ★ 類似度アイテムを NumericTableWidgetItem で作成 ★
-            score_item = NumericTableWidgetItem(str(score)) # ORBスコアは整数
+            score_item = NumericTableWidgetItem(str(score)) # 数値ソート用アイテム
             score_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-
-            self.similar_table.setItem(row, 0, thumb_item)
-            self.similar_table.setItem(row, 1, name_item)
-            self.similar_table.setItem(row, 2, size_item)
-            self.similar_table.setItem(row, 3, date_item)
-            self.similar_table.setItem(row, 4, dim_item)
-            self.similar_table.setItem(row, 5, sim_name_item)
-            self.similar_table.setItem(row, 6, score_item) # ★ ここで設定 ★
+            self.similar_table.setItem(row, 0, thumb_item); self.similar_table.setItem(row, 1, name_item); self.similar_table.setItem(row, 2, size_item); self.similar_table.setItem(row, 3, date_item); self.similar_table.setItem(row, 4, dim_item); self.similar_table.setItem(row, 5, sim_name_item); self.similar_table.setItem(row, 6, score_item)
         self.similar_table.setSortingEnabled(True)
 
         # タブの件数表示を更新
@@ -300,7 +279,7 @@ class ImageCleanerWindow(QMainWindow):
     @Slot()
     def update_preview(self):
         # (変更なし - 前回の応答と同じコード)
-        self.left_preview_path = None; self.right_preview_path = None # パス初期化
+        self.left_preview_path = None; self.right_preview_path = None
         current_tab_index = self.results_tabs.currentIndex()
         if current_tab_index == 0: table = self.blurry_table; is_similar_tab = False
         elif current_tab_index == 1: table = self.similar_table; is_similar_tab = True
@@ -317,8 +296,8 @@ class ImageCleanerWindow(QMainWindow):
                     else:
                         item_with_data = table.item(selected_row, 0)
                         if item_with_data: primary_path = item_with_data.data(Qt.ItemDataRole.UserRole)
-        self.left_preview_path = primary_path # パスを保持
-        self.right_preview_path = secondary_path if is_similar_tab else None # パスを保持
+        self.left_preview_path = primary_path
+        self.right_preview_path = secondary_path if is_similar_tab else None
         self._display_image_in_preview(self.left_preview, self.left_preview_path, "左プレビュー")
         if is_similar_tab: self._display_image_in_preview(self.right_preview, self.right_preview_path, "右プレビュー")
         else: self.right_preview.clear(); self.right_preview.setText("右プレビュー")
@@ -352,13 +331,11 @@ class ImageCleanerWindow(QMainWindow):
         self._clear_previews(); print("結果をクリアしました")
 
     def populate_dummy_data(self):
-        # (★ スコアアイテムを NumericTableWidgetItem に変更 ★)
+        # (変更なし - 前回の応答と同じコード)
         self.clear_results()
         dummy_blurry = [(False, "[T]", "blurry_1.jpg", "D:/test/blurry_1.jpg", "1920x1080", 12.34),(False, "[T]", "blurry_2.png", "D:/test/subdir/blurry_2.png", "1280x720", 45.67)]
         self.blurry_table.setRowCount(len(dummy_blurry))
-        for row, data in enumerate(dummy_blurry): checked, thumb, name, path, dims, score = data; chk_item = QTableWidgetItem(); chk_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled); chk_item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked); chk_item.setData(Qt.ItemDataRole.UserRole, path); thumb_item = QTableWidgetItem(thumb); name_item = QTableWidgetItem(name); path_item = QTableWidgetItem(path); dim_item = QTableWidgetItem(dims);
-        score_item = NumericTableWidgetItem(f"{score:.4f}"); # ★ 変更 ★
-        score_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); self.blurry_table.setItem(row, 0, chk_item); self.blurry_table.setItem(row, 1, thumb_item); self.blurry_table.setItem(row, 2, name_item); self.blurry_table.setItem(row, 3, path_item); self.blurry_table.setItem(row, 4, dim_item); self.blurry_table.setItem(row, 5, score_item)
+        for row, data in enumerate(dummy_blurry): checked, thumb, name, path, dims, score = data; chk_item = QTableWidgetItem(); chk_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled); chk_item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked); chk_item.setData(Qt.ItemDataRole.UserRole, path); thumb_item = QTableWidgetItem(thumb); name_item = QTableWidgetItem(name); path_item = QTableWidgetItem(path); dim_item = QTableWidgetItem(dims); score_item = NumericTableWidgetItem(f"{score:.4f}"); score_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); self.blurry_table.setItem(row, 0, chk_item); self.blurry_table.setItem(row, 1, thumb_item); self.blurry_table.setItem(row, 2, name_item); self.blurry_table.setItem(row, 3, path_item); self.blurry_table.setItem(row, 4, dim_item); self.blurry_table.setItem(row, 5, score_item)
         self.results_tabs.setTabText(0, f"ブレ画像 ({self.blurry_table.rowCount()})")
         test_dir = self.dir_path_edit.text() if self.dir_path_edit.text() else "."; path_a = os.path.join(test_dir, "A.jpg"); path_b = os.path.join(test_dir, "B.jpg"); path_c = os.path.join(test_dir, "C.jpg"); dummy_similar_pairs = []
         if os.path.exists(path_a) and os.path.exists(path_b): dummy_similar_pairs.append((path_a, path_b, 95))
@@ -368,38 +345,41 @@ class ImageCleanerWindow(QMainWindow):
         self.similar_table.setRowCount(len(display_data))
         for row, data in enumerate(display_data):
             primary_path = data['primary_path']; similar_path = data['similar_path']; score = data['score']; file_size = "N/A"; mod_time = "N/A"; dimensions = "N/A"
-            try: stat_info = os.stat(primary_path); fb = stat_info.st_size; file_size = f"{fb} B" if fb < 1024 else f"{fb/1024:.1f} KB" if fb < 1024**2 else f"{fb/(1024**2):.1f} MB"; mod_time = time.strftime('%Y/%m/%d %H:%M', time.localtime(stat_info.st_mtime)); img = cv2.imread(primary_path); (img is not None) and (h := img.shape[0], w := img.shape[1], dimensions := f"{w}x{h}")
+            try: stat_info = os.stat(primary_path); fb = stat_info.st_size; file_size = f"{fb} B" if fb < 1024 else f"{fb/1024:.1f} KB" if fb < 1024**2 else f"{fb/(1024**2):.1f} MB"; mod_time = time.strftime('%Y/%m/%d %H:%M', time.localtime(stat_info.st_mtime)); img = cv2.imread(primary_path); (img is not None) and (h := img.shape[0], w := img.shape[1], dimensions := f"{w}x{h}") # Python 3.8+
             except: pass
-            thumb_item = QTableWidgetItem("[T]"); thumb_item.setData(Qt.ItemDataRole.UserRole, (primary_path, similar_path)); name_item = QTableWidgetItem(os.path.basename(primary_path)); size_item = QTableWidgetItem(file_size); date_item = QTableWidgetItem(mod_time); dim_item = QTableWidgetItem(dimensions); sim_name_item = QTableWidgetItem(os.path.basename(similar_path));
-            score_item = NumericTableWidgetItem(str(score)); # ★ 変更 ★
-            score_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); self.similar_table.setItem(row, 0, thumb_item); self.similar_table.setItem(row, 1, name_item); self.similar_table.setItem(row, 2, size_item); self.similar_table.setItem(row, 3, date_item); self.similar_table.setItem(row, 4, dim_item); self.similar_table.setItem(row, 5, sim_name_item); self.similar_table.setItem(row, 6, score_item)
+            thumb_item = QTableWidgetItem("[T]"); thumb_item.setData(Qt.ItemDataRole.UserRole, (primary_path, similar_path)); name_item = QTableWidgetItem(os.path.basename(primary_path)); size_item = QTableWidgetItem(file_size); date_item = QTableWidgetItem(mod_time); dim_item = QTableWidgetItem(dimensions); sim_name_item = QTableWidgetItem(os.path.basename(similar_path)); score_item = NumericTableWidgetItem(str(score)); score_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); self.similar_table.setItem(row, 0, thumb_item); self.similar_table.setItem(row, 1, name_item); self.similar_table.setItem(row, 2, size_item); self.similar_table.setItem(row, 3, date_item); self.similar_table.setItem(row, 4, dim_item); self.similar_table.setItem(row, 5, sim_name_item); self.similar_table.setItem(row, 6, score_item)
         self.results_tabs.setTabText(1, f"類似ペア ({self.similar_table.rowCount()})")
 
+    # === ★ 削除/ファイル操作関連のメソッドを utils 呼び出しに変更 ★ ===
     @Slot()
     def delete_selected_items(self):
-        # (変更なし - 前回の応答と同じコード)
-        if send2trash is None: QMessageBox.critical(self, "エラー", "send2trash ライブラリが見つかりません。\n削除機能を使用できません。"); return
+        """選択された項目をゴミ箱に移動する"""
         files_to_delete = []
-        for row in range(self.blurry_table.rowCount()): chk_item = self.blurry_table.item(row, 0); (chk_item and chk_item.checkState() == Qt.CheckState.Checked) and (file_path := chk_item.data(Qt.ItemDataRole.UserRole)) and files_to_delete.append(file_path) # Python 3.8+
+        # ブレ画像タブから収集
+        for row in range(self.blurry_table.rowCount()):
+            chk_item = self.blurry_table.item(row, 0)
+            if chk_item and chk_item.checkState() == Qt.CheckState.Checked:
+                file_path = chk_item.data(Qt.ItemDataRole.UserRole)
+                if file_path: files_to_delete.append(file_path)
+        # 類似ペアタブから収集
         selected_rows = set(item.row() for item in self.similar_table.selectedItems())
-        for row in selected_rows: item_with_data = self.similar_table.item(row, 0); (item_with_data and (path_data := item_with_data.data(Qt.ItemDataRole.UserRole)) and isinstance(path_data, tuple) and len(path_data) == 2) and (primary_path := path_data[0]) and files_to_delete.append(primary_path) # Python 3.8+
-        unique_files_to_delete = sorted(list(set(files_to_delete)))
-        if not unique_files_to_delete: QMessageBox.information(self, "情報", "削除対象のファイルが選択されていません。"); return
-        num_files = len(unique_files_to_delete); message = f"{num_files} 個のファイルを選択しました。\nこれらのファイルをゴミ箱に移動しますか？\n\n"; display_limit = 10; message += "\n".join([os.path.basename(f) for f in unique_files_to_delete[:display_limit]]) + (f"\n...他 {num_files - display_limit} 個" if num_files > display_limit else "")
-        reply = QMessageBox.question(self, "削除の確認", message, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes:
-            print(f"{num_files} 個のファイルをゴミ箱へ移動します..."); deleted_count = 0; errors = []; files_actually_deleted = set()
-            for file_path in unique_files_to_delete:
-                try:
-                    normalized_path = os.path.normpath(file_path)
-                    if os.path.exists(normalized_path): send2trash.send2trash(normalized_path); print(f"  削除成功: {normalized_path}"); deleted_count += 1; files_actually_deleted.add(normalized_path)
-                    else: print(f"  削除スキップ: ファイルが見つかりません {normalized_path}"); errors.append(f"{os.path.basename(normalized_path)}: ファイルが見つかりません")
-                except Exception as e: print(f"  削除エラー: {file_path} - {e}"); errors.append(f"{os.path.basename(file_path)}: {e}")
-            if errors: QMessageBox.warning(self, "削除エラー", f"{len(errors)} 個のファイルの削除中にエラーが発生しました:\n" + "\n".join(errors))
-            if deleted_count > 0: QMessageBox.information(self, "削除完了", f"{deleted_count} 個のファイルをゴミ箱に移動しました。")
-            if files_actually_deleted: self._remove_deleted_items_from_table(files_actually_deleted)
+        for row in selected_rows:
+            item_with_data = self.similar_table.item(row, 0)
+            if item_with_data:
+                path_data = item_with_data.data(Qt.ItemDataRole.UserRole)
+                if isinstance(path_data, tuple) and len(path_data) == 2:
+                    primary_path = path_data[0]
+                    if primary_path: files_to_delete.append(primary_path)
+
+        # utils の削除関数を呼び出し
+        deleted_count, errors, files_actually_deleted = delete_files_to_trash(files_to_delete, self)
+
+        # テーブルから削除された項目を削除
+        if files_actually_deleted:
+            self._remove_deleted_items_from_table(files_actually_deleted)
 
     def _remove_deleted_items_from_table(self, deleted_file_paths_set):
+        """指定されたパスセットに一致する項目をテーブルから削除する"""
         # (変更なし - 前回の応答と同じコード)
         if not deleted_file_paths_set: return
         rows_to_remove_blurry = [row for row in range(self.blurry_table.rowCount()) if (chk_item := self.blurry_table.item(row, 0)) and (file_path := chk_item.data(Qt.ItemDataRole.UserRole)) and os.path.normpath(file_path) in deleted_file_paths_set]
@@ -408,12 +388,16 @@ class ImageCleanerWindow(QMainWindow):
         for row in sorted(list(set(rows_to_remove_similar)), reverse=True): self.similar_table.removeRow(row)
         self.results_tabs.setTabText(0, f"ブレ画像 ({self.blurry_table.rowCount()})"); self.results_tabs.setTabText(1, f"類似ペア ({self.similar_table.rowCount()})"); self._clear_previews()
 
-    def _open_file_external(self, file_path):
-        # (変更なし - 前回の応答と同じコード)
-        if not file_path or not os.path.exists(file_path): print(f"ファイルが見つかりません: {file_path}"); QMessageBox.warning(self, "エラー", f"ファイルが見つかりません:\n{file_path}"); return
-        try: os.startfile(os.path.normpath(file_path)); print(f"ファイルを開きました: {file_path}")
-        except Exception as e: print(f"ファイルを開けませんでした ({file_path}): {e}"); QMessageBox.critical(self, "エラー", f"ファイルを開けませんでした:\n{file_path}\n\n{e}")
+    def _delete_single_file(self, file_path):
+        """単一ファイルを削除する (utils呼び出し)"""
+        # utils の削除関数を呼び出し (結果はここでは使わない)
+        delete_files_to_trash([file_path], self)
 
+    def _open_file_external(self, file_path):
+        """ファイルを開く (utils呼び出し)"""
+        open_file_external(file_path, self)
+
+    # === キー/マウスイベントハンドラ (変更なし) ===
     def keyPressEvent(self, event: QKeyEvent):
         # (変更なし - 前回の応答と同じコード)
         key = event.key()
@@ -430,6 +414,7 @@ class ImageCleanerWindow(QMainWindow):
         # (変更なし - 前回の応答と同じコード)
         if event.button() == Qt.MouseButton.LeftButton: print("右プレビューがクリックされました (削除)"); self.right_preview_path and self._delete_single_file(self.right_preview_path)
 
+    # === 全選択ボタンのスロット (変更なし) ===
     @Slot()
     def select_all_blurry(self):
         # (変更なし)

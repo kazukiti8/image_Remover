@@ -1,0 +1,33 @@
+# .gitignore for Image Cleaner Project
+
+# 仮想環境フォルダ
+venv/
+/venv/
+
+# Pythonキャッシュファイルとフォルダ
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# PyInstaller関連ファイル
+dist/
+build/
+*.spec
+
+# IDE/エディタ設定ファイル (例)
+.vscode/
+.idea/
+
+# OS固有ファイル
+.DS_Store
+Thumbs.db
+
+# 設定ファイル (ユーザーホームに保存するので通常は不要だが、念のため)
+# .image_cleaner_settings.json # もしプロジェクト内に置くなら
+
+# ログファイル (もし生成する場合)
+*.log
+
+# その他 (必要に応じて追加)
+
