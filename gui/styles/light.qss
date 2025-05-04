@@ -1,0 +1,228 @@
+/* gui/styles/light.qss - ライトテーマ */
+
+QWidget {
+    background-color: #f0f0f0; /* ベース背景色 */
+    color: #000000; /* 基本テキスト色 */
+    font-family: "Yu Gothic UI", "Meiryo UI", sans-serif; /* フォント */
+}
+
+QMainWindow {
+    background-color: #e8e8e8; /* メインウィンドウ背景 */
+}
+
+QGroupBox {
+    background-color: #f8f8f8;
+    border: 1px solid #d0d0d0;
+    border-radius: 5px;
+    margin-top: 1ex; /* GroupBox タイトルのためのマージン */
+    font-weight: bold;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 3px;
+    background-color: #f0f0f0; /* タイトル背景 */
+    left: 10px;
+}
+
+QLabel {
+    background-color: transparent; /* ラベル背景は透過 */
+}
+
+QLineEdit, QTextEdit, QSpinBox, QDoubleSpinBox {
+    background-color: #ffffff;
+    border: 1px solid #c0c0c0;
+    border-radius: 3px;
+    padding: 2px 4px;
+    selection-background-color: #a8d8ff; /* 選択範囲の背景色 */
+    selection-color: #000000; /* 選択範囲のテキスト色 */
+}
+
+QLineEdit:read-only {
+    background-color: #e0e0e0;
+}
+
+QPushButton {
+    background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                      stop: 0 #ffffff, stop: 1 #e0e0e0);
+    border: 1px solid #b0b0b0;
+    border-radius: 4px;
+    padding: 5px 15px;
+    min-width: 60px;
+}
+
+QPushButton:hover {
+    background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                      stop: 0 #f8f8f8, stop: 1 #d0d0d0);
+    border-color: #a0a0a0;
+}
+
+QPushButton:pressed {
+    background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                      stop: 0 #d0d0d0, stop: 1 #c0c0c0);
+    border-color: #909090;
+}
+
+QPushButton:disabled {
+    background-color: #d8d8d8;
+    border-color: #c0c0c0;
+    color: #a0a0a0;
+}
+
+QCheckBox, QRadioButton {
+    background-color: transparent;
+}
+
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 13px;
+    height: 13px;
+    border: 1px solid #b0b0b0;
+    border-radius: 3px;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #5a9dff;
+    border-color: #4088e8;
+    image: url(:/qt-project.org/styles/commonstyle/images/checkbox-checked.png); /* チェックマーク (要調整) */
+}
+QRadioButton::indicator:checked {
+     background-color: #5a9dff;
+     border-color: #4088e8;
+     border-radius: 7px; /* 丸くする */
+}
+
+QComboBox {
+    background-color: #ffffff;
+    border: 1px solid #c0c0c0;
+    border-radius: 3px;
+    padding: 2px 4px;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 15px;
+    border-left-width: 1px;
+    border-left-color: #c0c0c0;
+    border-left-style: solid;
+    border-top-right-radius: 3px;
+    border-bottom-right-radius: 3px;
+}
+
+QComboBox QAbstractItemView { /* ドロップダウンリスト */
+    background-color: #ffffff;
+    border: 1px solid #c0c0c0;
+    selection-background-color: #a8d8ff;
+    selection-color: #000000;
+}
+
+QProgressBar {
+    border: 1px solid #b0b0b0;
+    border-radius: 3px;
+    text-align: center;
+    background-color: #e8e8e8;
+    color: #303030;
+}
+
+QProgressBar::chunk {
+    background-color: #5a9dff;
+    border-radius: 2px;
+    margin: 1px;
+}
+
+QTabWidget::pane {
+    border: 1px solid #c0c0c0;
+    border-top: none; /* タブの下線と重ならないように */
+    background-color: #ffffff;
+}
+
+QTabBar::tab {
+    background-color: #e0e0e0;
+    border: 1px solid #c0c0c0;
+    border-bottom: none; /* 選択タブ以外は下の線を消す */
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    padding: 5px 10px;
+    margin-right: 2px;
+}
+
+QTabBar::tab:selected {
+    background-color: #ffffff; /* ペインと同じ色 */
+    margin-bottom: -1px; /* 選択タブを少し下にずらして線を重ねる */
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: #e8e8e8;
+}
+
+QTableWidget {
+    background-color: #ffffff;
+    border: 1px solid #c0c0c0;
+    gridline-color: #d0d0d0; /* グリッド線の色 */
+    selection-background-color: #a8d8ff;
+    selection-color: #000000;
+}
+
+QHeaderView::section {
+    background-color: #e8e8e8;
+    border: 1px solid #c0c0c0;
+    padding: 4px;
+    font-weight: bold;
+}
+
+QGraphicsView {
+    border: 1px solid #c0c0c0;
+    background-color: #ffffff; /* グラフィックビューの背景 */
+}
+
+/* メニューバー */
+QMenuBar {
+    background-color: #e8e8e8;
+    border-bottom: 1px solid #c0c0c0;
+}
+QMenuBar::item {
+    background: transparent;
+    padding: 4px 8px;
+}
+QMenuBar::item:selected {
+    background: #c0c0c0;
+}
+/* メニュー */
+QMenu {
+    background-color: #ffffff;
+    border: 1px solid #b0b0b0;
+}
+QMenu::item {
+    padding: 4px 20px;
+}
+QMenu::item:selected {
+    background-color: #a8d8ff;
+    color: #000000;
+}
+QMenu::separator {
+    height: 1px;
+    background: #c0c0c0;
+    margin: 4px 0;
+}
+
+/* スクロールバー (必要なら) */
+/*
+QScrollBar:vertical { ... }
+QScrollBar::handle:vertical { ... }
+QScrollBar::add-line:vertical { ... }
+QScrollBar::sub-line:vertical { ... }
+QScrollBar:horizontal { ... }
+QScrollBar::handle:horizontal { ... }
+QScrollBar::add-line:horizontal { ... }
+QScrollBar::sub-line:horizontal { ... }
+*/
+
+/* ツールチップ */
+QToolTip {
+    background-color: #ffffdc; /* やや黄色っぽい背景 */
+    color: #000000;
+    border: 1px solid #c0c0c0;
+    padding: 2px;
+}
+
