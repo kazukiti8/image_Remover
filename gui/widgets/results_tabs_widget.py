@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QWidget, QTabWidget, QTableWidget, QHeaderView,
 from PySide6.QtCore import Qt, Signal, Slot, QPoint, QModelIndex
 from PySide6.QtGui import QAction, QColor
 from typing import List, Dict, Tuple, Optional, Any, Union, Set
+import datetime # get_file_info のフォールバック用
 
 # 型エイリアス
 BlurResultItem = Dict[str, Union[str, float]]
@@ -35,12 +36,12 @@ except ImportError:
     print("エラー: utils.file_operations モジュールのインポートに失敗しました。")
     # フォールバック関数
     def get_file_info(fp: str) -> FileInfoResult:
-        # この関数はファイルが存在する場合のみ呼ばれる想定になる
         try:
             stat_info = os.stat(fp)
             size = stat_info.st_size
-            mod_time = datetime.fromtimestamp(stat_info.st_mtime).strftime('%Y/%m/%d %H:%M')
-            return f"{size} B", mod_time, "N/A", "N/A" # 簡易情報
+            mod_time = datetime.datetime.fromtimestamp(stat_info.st_mtime).strftime('%Y/%m/%d %H:%M')
+            # Pillow がない場合、解像度とExifは取得できない
+            return f"{size} B", mod_time, "N/A", "N/A"
         except Exception:
             return "エラー", "エラー", "エラー", "エラー"
 
@@ -88,6 +89,7 @@ class ResultsTabsWidget(QTabWidget):
         return table
 
     def _create_blurry_table(self) -> QTableWidget:
+        # (変更なし)
         headers = ["", "ファイル名", "サイズ", "更新日時", "撮影日時", "解像度", "ブレ度スコア", "パス"]
         table = self._create_table_widget(len(headers), headers, QAbstractItemView.SelectionMode.ExtendedSelection)
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -100,33 +102,42 @@ class ResultsTabsWidget(QTabWidget):
         table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
         return table
 
+    # ★★★ ヘッダーとリサイズモードを修正 ★★★
     def _create_similar_table(self) -> QTableWidget:
-        headers = ["ファイル名1", "サイズ1", "更新日時1", "撮影日時1", "解像度1", "ファイル名2", "類似度(%)", "パス1"]
+        """類似ペア表示用のテーブルを作成"""
+        headers = ["ファイル名1", "サイズ1", "更新日時1", "撮影日時1", "解像度1", "ファイル名2", "解像度2", "類似度(%)", "パス1"] # ★ 解像度2追加 ★
         table = self._create_table_widget(len(headers), headers, QAbstractItemView.SelectionMode.ExtendedSelection)
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+        # リサイズモード設定 (インデックス調整)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)          # Filename1
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Size1
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents) # Mod Time 1
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # Exif Date 1
+        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents) # Resolution 1
+        table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)          # Filename2
+        table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents) # Resolution 2 ★
+        table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents) # Score
+        table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Stretch)          # Path1
         return table
 
+    # ★★★ ヘッダーとリサイズモードを修正 ★★★
     def _create_duplicate_table(self) -> QTableWidget:
-        headers = ["ファイル名1", "サイズ1", "更新日時1", "撮影日時1", "解像度1", "ファイル名2", "パス1", "パス2"]
+        """重複ペア表示用のテーブルを作成"""
+        headers = ["ファイル名1", "サイズ1", "更新日時1", "撮影日時1", "解像度1", "ファイル名2", "解像度2", "パス1", "パス2"] # ★ 解像度2追加 ★
         table = self._create_table_widget(len(headers), headers, QAbstractItemView.SelectionMode.ExtendedSelection)
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
-        table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+        # リサイズモード設定 (インデックス調整)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)          # Filename1
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Size1
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents) # Mod Time 1
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # Exif Date 1
+        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents) # Resolution 1
+        table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)          # Filename2
+        table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents) # Resolution 2 ★
+        table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)          # Path1
+        table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Stretch)          # Path2
         return table
 
     def _create_error_table(self) -> QTableWidget:
+        # (変更なし)
         headers = ["タイプ", "ファイル/ペア", "エラー内容"]
         table = self._create_table_widget(len(headers), headers, QAbstractItemView.SelectionMode.SingleSelection, sorting_enabled=True)
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -135,54 +146,39 @@ class ResultsTabsWidget(QTabWidget):
         return table
 
     # --- データ投入メソッド ---
-    # ★★★ フィルタリング処理を追加 ★★★
     @Slot(list, list, dict, list)
     def populate_results(self, blurry_results: List[BlurResultItem], similar_results: List[SimilarPair], duplicate_results: DuplicateDict, scan_errors: List[ErrorDict]) -> None:
         """結果データをフィルタリングし、テーブルに表示する"""
-
-        # --- フィルタリング ---
-        # ブレ画像: path が存在する項目のみ
+        # フィルタリング
         filtered_blurry = [item for item in blurry_results if os.path.exists(item['path'])]
-
-        # 類似ペア: path1 と path2 の両方が存在する項目のみ
         filtered_similar = [item for item in similar_results if os.path.exists(str(item[0])) and os.path.exists(str(item[1]))]
-
-        # 重複ペア: path1 と path2 の両方が存在するペアのみ
-        # まずペアリストに変換
         duplicate_pairs = self._flatten_duplicates_to_pairs(duplicate_results)
         filtered_duplicates = [pair for pair in duplicate_pairs if os.path.exists(pair['path1']) and os.path.exists(pair['path2'])]
-
-        # エラーリストはそのまま表示
         filtered_errors = scan_errors
-        # --------------------
 
-        # フィルタリングされたデータでテーブルを更新
+        # テーブル更新
         self._populate_table(self.blurry_table, filtered_blurry, self._create_blurry_row_items)
         self._populate_table(self.similar_table, filtered_similar, self._create_similar_row_items)
         self._populate_table(self.duplicate_table, filtered_duplicates, self._create_duplicate_row_items)
         self._populate_table(self.error_table, filtered_errors, self._create_error_row_items)
-        self._update_tab_texts() # タブの件数表示も更新
+        self._update_tab_texts()
 
     def _populate_table(self, table: QTableWidget, data: List[Any], item_creator_func) -> None:
-        """指定されたデータでテーブルを更新する"""
+        # (変更なし)
         table.setSortingEnabled(False)
         table.setRowCount(len(data))
         for row, row_data in enumerate(data):
-            # item_creator_func はファイルが存在するデータに対してのみ呼ばれる
             items: List[QTableWidgetItem] = item_creator_func(row_data)
             for col, item in enumerate(items):
                 table.setItem(row, col, item)
         table.setSortingEnabled(True)
 
-    # ★★★ ファイル存在チェックを削除 (呼び出し元でフィルタリング済) ★★★
     def _create_blurry_row_items(self, data: BlurResultItem) -> List[QTableWidgetItem]:
-        """ブレ画像データからテーブル行アイテムを作成"""
+        # (変更なし)
         path: str = data['path']
         score: float = float(data.get('score', -1.0))
         base_name = os.path.basename(path)
-        # ファイルは存在するので get_file_info を呼び出す
         file_size, mod_time, dimensions, exif_date = get_file_info(path)
-
         chk_item = QTableWidgetItem()
         chk_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
         chk_item.setCheckState(Qt.CheckState.Unchecked)
@@ -195,10 +191,10 @@ class ResultsTabsWidget(QTabWidget):
         score_text = f"{score:.4f}" if score >= 0 else "N/A"
         score_item = NumericTableWidgetItem(score_text)
         score_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        path_item = QTableWidgetItem(path) # 通常のパスを表示
+        path_item = QTableWidgetItem(path)
         return [chk_item, name_item, size_item, mod_date_item, exif_date_item, dim_item, score_item, path_item]
 
-    # ★★★ ファイル存在チェックを削除 (呼び出し元でフィルタリング済) ★★★
+    # ★★★ 解像度2の情報を追加 ★★★
     def _create_similar_row_items(self, data: SimilarPair) -> List[QTableWidgetItem]:
         """類似ペアデータからテーブル行アイテムを作成"""
         path1: str = str(data[0])
@@ -206,8 +202,10 @@ class ResultsTabsWidget(QTabWidget):
         score: int = int(data[2])
         base_name1 = os.path.basename(path1)
         base_name2 = os.path.basename(path2)
-        # ファイルは両方存在するので get_file_info を呼び出す
+        # ファイル1の情報
         file_size1, mod_time1, dimensions1, exif_date1 = get_file_info(path1)
+        # ★ ファイル2の情報 (解像度のみ取得) ★
+        _, _, dimensions2, _ = get_file_info(path2)
 
         name1_item = QTableWidgetItem(base_name1)
         name1_item.setData(Qt.ItemDataRole.UserRole, (path1, path2))
@@ -215,11 +213,14 @@ class ResultsTabsWidget(QTabWidget):
         mod_date1_item = DateTimeTableWidgetItem(mod_time1)
         exif_date1_item = ExifDateTimeTableWidgetItem(exif_date1)
         dim1_item = ResolutionTableWidgetItem(dimensions1)
-        name2_item = QTableWidgetItem(base_name2) # 通常のファイル名2
+        name2_item = QTableWidgetItem(base_name2)
+        # ★ 解像度2アイテムを追加 ★
+        dim2_item = ResolutionTableWidgetItem(dimensions2)
         score_item = NumericTableWidgetItem(str(score))
         score_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        path1_item = QTableWidgetItem(path1) # 通常のパス1
-        return [name1_item, size1_item, mod_date1_item, exif_date1_item, dim1_item, name2_item, score_item, path1_item]
+        path1_item = QTableWidgetItem(path1)
+        # ★ リストに dim2_item を追加 ★
+        return [name1_item, size1_item, mod_date1_item, exif_date1_item, dim1_item, name2_item, dim2_item, score_item, path1_item]
 
     def _flatten_duplicates_to_pairs(self, duplicate_results: DuplicateDict) -> List[DuplicatePair]:
         # (変更なし)
@@ -234,7 +235,7 @@ class ResultsTabsWidget(QTabWidget):
                 pair_list.append({'path1': first_path, 'path2': second_path, 'group_hash': group_hash})
         return pair_list
 
-    # ★★★ ファイル存在チェックを削除 (呼び出し元でフィルタリング済) ★★★
+    # ★★★ 解像度2の情報を追加 ★★★
     def _create_duplicate_row_items(self, data: DuplicatePair) -> List[QTableWidgetItem]:
         """重複ペアデータからテーブル行アイテムを作成"""
         path1: str = data['path1']
@@ -242,8 +243,10 @@ class ResultsTabsWidget(QTabWidget):
         group_hash: str = data['group_hash']
         base_name1 = os.path.basename(path1)
         base_name2 = os.path.basename(path2)
-        # ファイルは両方存在するので get_file_info を呼び出す
+        # ファイル1の情報
         file_size1, mod_time1, dimensions1, exif_date1 = get_file_info(path1)
+        # ★ ファイル2の情報 (解像度のみ取得) ★
+        _, _, dimensions2, _ = get_file_info(path2)
 
         name1_item = QTableWidgetItem(base_name1)
         name1_item.setData(Qt.ItemDataRole.UserRole, {'path1': path1, 'path2': path2, 'group_hash': group_hash})
@@ -251,11 +254,13 @@ class ResultsTabsWidget(QTabWidget):
         mod_date1_item = DateTimeTableWidgetItem(mod_time1)
         exif_date1_item = ExifDateTimeTableWidgetItem(exif_date1)
         dim1_item = ResolutionTableWidgetItem(dimensions1)
-        name2_item = QTableWidgetItem(base_name2) # 通常のファイル名2
-        path1_item = QTableWidgetItem(path1) # 通常のパス1
-        path2_item = QTableWidgetItem(path2) # 通常のパス2
-
-        return [name1_item, size1_item, mod_date1_item, exif_date1_item, dim1_item, name2_item, path1_item, path2_item]
+        name2_item = QTableWidgetItem(base_name2)
+        # ★ 解像度2アイテムを追加 ★
+        dim2_item = ResolutionTableWidgetItem(dimensions2)
+        path1_item = QTableWidgetItem(path1)
+        path2_item = QTableWidgetItem(path2)
+        # ★ リストに dim2_item を追加 ★
+        return [name1_item, size1_item, mod_date1_item, exif_date1_item, dim1_item, name2_item, dim2_item, path1_item, path2_item]
 
     def _create_error_row_items(self, data: ErrorDict) -> List[QTableWidgetItem]:
         # (変更なし)
@@ -286,19 +291,16 @@ class ResultsTabsWidget(QTabWidget):
         self._update_tab_texts()
 
     # --- 選択状態取得メソッド ---
+    # (get_selected_blurry_paths, get_selected_similar_primary_paths, get_selected_duplicate_paths, get_current_selection_paths は変更なし)
     def get_selected_blurry_paths(self) -> List[str]:
-        # (変更なし - 存在チェックは不要になった)
         paths: List[str] = []
         for row in range(self.blurry_table.rowCount()):
             chk_item = self.blurry_table.item(row, 0)
             if chk_item and chk_item.checkState() == Qt.CheckState.Checked:
                 path: Optional[str] = chk_item.data(Qt.ItemDataRole.UserRole)
-                if path: # パス自体は存在するはず
-                    paths.append(path)
+                if path: paths.append(path)
         return paths
-
     def get_selected_similar_primary_paths(self) -> List[str]:
-        # (変更なし)
         paths: List[str] = []
         selected_rows: Set[int] = set(item.row() for item in self.similar_table.selectedItems())
         for row in selected_rows:
@@ -307,9 +309,7 @@ class ResultsTabsWidget(QTabWidget):
             if isinstance(path_data, tuple) and len(path_data) == 2 and path_data[0]:
                 paths.append(path_data[0])
         return paths
-
     def get_selected_duplicate_paths(self) -> List[str]:
-        # (変更なし - 存在チェックは不要になった)
         paths: List[str] = []
         selected_rows: Set[int] = set(item.row() for item in self.duplicate_table.selectedItems())
         for row in selected_rows:
@@ -317,12 +317,9 @@ class ResultsTabsWidget(QTabWidget):
             data: Any = item.data(Qt.ItemDataRole.UserRole) if item else None
             if isinstance(data, dict) and 'path2' in data:
                 path2 = data['path2']
-                if path2: # パス自体は存在するはず
-                    paths.append(path2)
+                if path2: paths.append(path2)
         return paths
-
     def get_current_selection_paths(self) -> SelectionPaths:
-        # (変更なし)
         primary_path: Optional[str] = None; secondary_path: Optional[str] = None
         current_index: int = self.currentIndex()
         table: Optional[QTableWidget] = self.widget(current_index) if isinstance(self.widget(current_index), QTableWidget) else None
@@ -330,7 +327,6 @@ class ResultsTabsWidget(QTabWidget):
         selected_items: List[QTableWidgetItem] = table.selectedItems()
         row: int = selected_items[0].row() if selected_items else -1
         if row == -1: return None, None
-
         if current_index == 0: # Blurry
             item = table.item(row, 0)
             primary_path = item.data(Qt.ItemDataRole.UserRole) if item else None
@@ -478,7 +474,8 @@ class ResultsTabsWidget(QTabWidget):
         data: List[SimilarPair] = []
         for row in range(self.similar_table.rowCount()):
             item: Optional[QTableWidgetItem] = self.similar_table.item(row, 0)
-            score_item: Optional[QTableWidgetItem] = self.similar_table.item(row, 6)
+            # ★ 類似度スコア列のインデックス修正 ★
+            score_item: Optional[QTableWidgetItem] = self.similar_table.item(row, 7)
             if item and score_item:
                 path_data: Any = item.data(Qt.ItemDataRole.UserRole)
                 try:

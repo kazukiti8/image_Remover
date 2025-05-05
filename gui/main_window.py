@@ -6,10 +6,10 @@ import traceback # エラー時のトレースバック表示用
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QFrame, QFileDialog, QProgressBar,
-    QMessageBox, QMenuBar # QMenuBar はテーマ用
+    QMessageBox, QMenuBar, QTableWidget, QAbstractItemView # QTableWidget, QAbstractItemView 追加
 )
 from PySide6.QtCore import Qt, QThreadPool, Slot, QDir
-from PySide6.QtGui import QCloseEvent, QKeyEvent, QAction, QActionGroup # QAction, QActionGroup はテーマ用
+from PySide6.QtGui import QCloseEvent, QKeyEvent, QAction, QActionGroup
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional, Any, Union, Set
 
@@ -28,7 +28,6 @@ LoadStateResult = Tuple[Optional[ScanStateData], Optional[str]]
 # --- ウィジェット、ワーカー、ダイアログをインポート ---
 try:
     from .widgets.preview_widget import PreviewWidget
-    # ★ results_tabs_widget.py が更新されていることを確認 ★
     from .widgets.results_tabs_widget import ResultsTabsWidget
     from .workers import ScanWorker, WorkerSignals
     from .dialogs.settings_dialog import SettingsDialog
@@ -44,7 +43,7 @@ try:
     from utils.results_handler import save_results_to_file, load_results_from_file, load_scan_state, delete_scan_state, get_state_filepath
 except ImportError as e:
     print(f"エラー: ユーティリティモジュールのインポートに失敗 ({e})")
-    # フォールバック関数 (機能制限付きで起動させるため)
+    # フォールバック関数
     def load_settings() -> SettingsDict: return {'last_directory': os.path.expanduser("~"), 'theme': 'light', 'last_save_load_dir': os.path.expanduser("~"), 'presets': {}}
     def save_settings(s: SettingsDict) -> bool: print("警告: 設定保存機能が無効"); return False
     def delete_files_to_trash(fps: List[str], p: Optional[QWidget] = None) -> DeleteResult: print("警告: 削除機能が無効"); return 0, [{'path': 'N/A', 'error': '削除機能が無効'}], set()
@@ -80,8 +79,7 @@ class ImageCleanerWindow(QMainWindow):
         self.results_tabs_widget: ResultsTabsWidget
         self.delete_button: QPushButton
         self.select_all_blurry_button: QPushButton
-        # ★ ボタン名を変更 ★
-        self.select_all_duplicates_button: QPushButton # 旧 select_all_duplicates_button
+        self.select_all_duplicates_button: QPushButton # 名前変更済み
         self.deselect_all_button: QPushButton
         # --- その他のインスタンス変数 ---
         self.current_worker: Optional[ScanWorker] = None
@@ -176,17 +174,15 @@ class ImageCleanerWindow(QMainWindow):
         # --- アクションボタンエリア ---
         action_layout = QHBoxLayout()
         self.delete_button = QPushButton("選択した項目をゴミ箱へ移動")
-        # ★ ツールチップ変更 ★
         self.delete_button.setToolTip("現在表示中のタブで選択/チェックされた項目を削除します。\n(ブレ:チェックされたもの, 類似/重複ペア:選択された行のファイル2)")
         self.select_all_blurry_button = QPushButton("全選択(ブレ)")
-        # ★ ボタン名変更 ★
-        self.select_all_duplicates_button = QPushButton("全選択(重複ペア)")
+        self.select_all_duplicates_button = QPushButton("全選択(重複ペア)") # 名前変更済み
         self.deselect_all_button = QPushButton("全選択解除")
 
         action_layout.addWidget(self.delete_button)
         action_layout.addStretch()
         action_layout.addWidget(self.select_all_blurry_button)
-        action_layout.addWidget(self.select_all_duplicates_button) # 名前変更
+        action_layout.addWidget(self.select_all_duplicates_button)
         action_layout.addWidget(self.deselect_all_button)
         main_layout.addLayout(action_layout)
 
@@ -267,8 +263,7 @@ class ImageCleanerWindow(QMainWindow):
         # アクションボタン
         self.delete_button.clicked.connect(self.delete_selected_items)
         self.select_all_blurry_button.clicked.connect(self.results_tabs_widget.select_all_blurry)
-        # ★ 接続先メソッド変更 ★
-        self.select_all_duplicates_button.clicked.connect(self.results_tabs_widget.select_all_duplicates)
+        self.select_all_duplicates_button.clicked.connect(self.results_tabs_widget.select_all_duplicates) # 接続先変更済み
         self.deselect_all_button.clicked.connect(self.results_tabs_widget.deselect_all)
 
         # 結果タブとプレビューの連携
@@ -279,8 +274,6 @@ class ImageCleanerWindow(QMainWindow):
         # 結果タブからのリクエスト処理
         self.results_tabs_widget.delete_file_requested.connect(self._handle_delete_request)
         self.results_tabs_widget.open_file_requested.connect(self._handle_open_request)
-        # ★ delete_duplicates_requested は削除されたので接続解除 ★
-        # self.results_tabs_widget.delete_duplicates_requested.connect(self._handle_delete_duplicates_request)
 
     # --- スロット関数 ---
     @Slot()
@@ -409,7 +402,9 @@ class ImageCleanerWindow(QMainWindow):
         """ScanWorkerからの結果準備完了シグナルを受け取るスロット"""
         print("結果受信: Blurry={}, Similar={}, Duplicates={}, Errors={}".format(len(blurry), len(similar), len(duplicates), len(errors)))
         self.results_tabs_widget.populate_results(blurry, similar, duplicates, errors)
-        has_results: bool = bool(blurry or similar or self.results_tabs_widget.duplicate_table.rowCount() > 0) # 重複タブはペア数で判断
+        has_results: bool = (self.results_tabs_widget.blurry_table.rowCount() > 0 or
+                             self.results_tabs_widget.similar_table.rowCount() > 0 or
+                             self.results_tabs_widget.duplicate_table.rowCount() > 0)
         self._update_ui_state(scan_enabled=True, actions_enabled=has_results, cancel_enabled=False)
         self.results_saved = False
         self.current_worker = None
@@ -495,18 +490,66 @@ class ImageCleanerWindow(QMainWindow):
 
     @Slot(str)
     def _delete_single_file_from_preview(self, file_path: str) -> None:
-        """プレビュー画像がクリックされたときに呼び出されるスロット"""
+        """プレビュー画像がクリックされたときに呼び出されるスロット (削除と再選択処理)"""
         print(f"プレビュークリック削除要求受信: {file_path}")
         if not file_path:
             return
 
+        # 削除前に現在のテーブルと行インデックスを取得
+        current_tab_index = self.results_tabs_widget.currentIndex()
+        current_table: Optional[QTableWidget] = self.results_tabs_widget.widget(current_tab_index)
+        if not isinstance(current_table, QTableWidget):
+            print("警告: アクティブなテーブルが見つかりません。")
+            return
+
+        original_row_index = self._find_row_index_by_path(current_table, file_path)
+        # if original_row_index == -1:
+        #     print(f"警告: 削除対象のファイルパス {file_path} が現在のテーブルに見つかりません。")
+            # 見つからなくても削除確認は行う
+
+        # 確認ダイアログを表示
         filename = os.path.basename(file_path)
         reply = QMessageBox.question(self, "削除の確認",
                                      f"プレビューの画像 '{filename}' をゴミ箱に移動しますか？",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                      QMessageBox.StandardButton.No)
+
         if reply == QMessageBox.StandardButton.Yes:
+            # ファイル削除とUI更新を実行
             errors_occurred = self._delete_files_and_update_ui([file_path])
+
+            # 削除成功後に再選択処理
+            deletion_successful = not errors_occurred and not self.results_saved
+
+            if deletion_successful:
+                # 再度アクティブなテーブルを取得
+                current_table_after_delete: Optional[QTableWidget] = self.results_tabs_widget.widget(self.results_tabs_widget.currentIndex())
+                if isinstance(current_table_after_delete, QTableWidget):
+                    new_row_count = current_table_after_delete.rowCount()
+                    if new_row_count > 0:
+                        # 削除された行のインデックス、または最後の行を選択
+                        next_row_index = min(original_row_index if original_row_index != -1 else new_row_count -1, new_row_count - 1)
+                        next_row_index = max(0, next_row_index)
+
+                        print(f"削除後、行 {next_row_index} を選択します。")
+                        current_table_after_delete.clearSelection()
+                        # ブレ画像タブの場合はチェックボックスを操作できないので selectRow
+                        if current_tab_index == 0:
+                             current_table_after_delete.selectRow(next_row_index)
+                        else: # 類似・重複ペアタブは行選択
+                             current_table_after_delete.selectRow(next_row_index)
+
+                        # 選択した行が表示されるようにスクロール
+                        item_to_scroll = current_table_after_delete.item(next_row_index, 0)
+                        if item_to_scroll:
+                            current_table_after_delete.scrollToItem(item_to_scroll, QAbstractItemView.ScrollHint.EnsureVisible)
+                        # プレビューを更新 (選択状態が変わったシグナルが飛ぶはずだが念のため)
+                        self.update_preview_display()
+                    else:
+                        print("テーブルが空になったため、再選択は行いません。")
+                        self.preview_widget.clear_previews()
+
+            # ステータスバー等の更新
             has_results_after_delete: bool = (self.results_tabs_widget.blurry_table.rowCount() > 0 or
                                               self.results_tabs_widget.similar_table.rowCount() > 0 or
                                               self.results_tabs_widget.duplicate_table.rowCount() > 0)
@@ -516,7 +559,7 @@ class ImageCleanerWindow(QMainWindow):
                 else:
                     self.status_label.setText(f"ステータス: '{filename}' をゴミ箱に移動しました。")
             else:
-                 self.status_label.setText(f"ステータス: '{filename}' 削除処理完了 (UI変更なし)。")
+                 self.status_label.setText(f"ステータス: '{filename}' の削除処理完了 (ファイル移動なし)。")
             self._update_ui_state(actions_enabled=has_results_after_delete)
         else:
             print("プレビューからの削除はキャンセルされました。")
@@ -526,7 +569,37 @@ class ImageCleanerWindow(QMainWindow):
         """結果タブのコンテキストメニューからの削除要求を処理するスロット"""
         if not file_path:
             return
+
+        # ★ 削除前に現在のテーブルと行インデックスを取得 ★
+        current_tab_index = self.results_tabs_widget.currentIndex()
+        current_table: Optional[QTableWidget] = self.results_tabs_widget.widget(current_tab_index)
+        if not isinstance(current_table, QTableWidget): return
+
+        original_row_index = self._find_row_index_by_path(current_table, file_path)
+
+        # 削除処理（確認はdelete_files_to_trash内）
         errors_occurred = self._delete_files_and_update_ui([file_path])
+
+        # ★ 削除成功後に再選択処理 ★
+        deletion_successful = not errors_occurred and not self.results_saved
+        if deletion_successful:
+             current_table_after_delete: Optional[QTableWidget] = self.results_tabs_widget.widget(self.results_tabs_widget.currentIndex())
+             if isinstance(current_table_after_delete, QTableWidget):
+                 new_row_count = current_table_after_delete.rowCount()
+                 if new_row_count > 0:
+                     next_row_index = min(original_row_index if original_row_index != -1 else new_row_count -1, new_row_count - 1)
+                     next_row_index = max(0, next_row_index)
+                     print(f"コンテキストメニュー削除後、行 {next_row_index} を選択します。")
+                     current_table_after_delete.clearSelection()
+                     current_table_after_delete.selectRow(next_row_index)
+                     item_to_scroll = current_table_after_delete.item(next_row_index, 0)
+                     if item_to_scroll:
+                         current_table_after_delete.scrollToItem(item_to_scroll, QAbstractItemView.ScrollHint.EnsureVisible)
+                     self.update_preview_display()
+                 else:
+                     self.preview_widget.clear_previews()
+
+        # ステータス更新
         has_results_after_delete: bool = (self.results_tabs_widget.blurry_table.rowCount() > 0 or
                                           self.results_tabs_widget.similar_table.rowCount() > 0 or
                                           self.results_tabs_widget.duplicate_table.rowCount() > 0)
@@ -537,7 +610,7 @@ class ImageCleanerWindow(QMainWindow):
             else:
                 self.status_label.setText(f"ステータス: '{filename}' をゴミ箱に移動しました。")
         else:
-            self.status_label.setText(f"ステータス: '{filename}' 削除処理完了 (UI変更なし)。")
+            self.status_label.setText(f"ステータス: '{filename}' 削除処理完了 (ファイル移動なし)。")
         self._update_ui_state(actions_enabled=has_results_after_delete)
 
     @Slot(str)
@@ -546,8 +619,6 @@ class ImageCleanerWindow(QMainWindow):
         print(f"オープン要求受信: {file_path}")
         if file_path:
             open_file_external(file_path, self)
-
-    # ★★★ _handle_delete_duplicates_request は削除 ★★★
 
     @Slot()
     def save_results(self) -> None:
@@ -603,10 +674,11 @@ class ImageCleanerWindow(QMainWindow):
 
         self._clear_all_results()
         if results_data:
+            # populate_results 内で存在しないファイルはフィルタリングされる
             self.results_tabs_widget.populate_results(
                 results_data.get('blurry', []),
                 results_data.get('similar', []),
-                results_data.get('duplicates', {}), # 読み込み時は元の形式
+                results_data.get('duplicates', {}),
                 results_data.get('errors', [])
             )
 
@@ -614,11 +686,46 @@ class ImageCleanerWindow(QMainWindow):
             print("読み込んだ結果のスキャン時設定:", settings_used)
 
         self.status_label.setText(f"ステータス: 結果を読み込みました: {os.path.basename(filepath)}")
-        has_results: bool = bool(results_data and (results_data.get('blurry') or results_data.get('similar') or self.results_tabs_widget.duplicate_table.rowCount() > 0)) # 重複タブはペア数で判断
+        has_results: bool = (self.results_tabs_widget.blurry_table.rowCount() > 0 or
+                             self.results_tabs_widget.similar_table.rowCount() > 0 or
+                             self.results_tabs_widget.duplicate_table.rowCount() > 0)
         self._update_ui_state(scan_enabled=True, actions_enabled=has_results, cancel_enabled=False)
         self.results_saved = True
 
     # --- ヘルパーメソッド ---
+    def _find_row_index_by_path(self, table: QTableWidget, file_path: str) -> int:
+        """指定されたテーブル内で、特定のファイルパスを持つ行のインデックスを返す"""
+        normalized_path_to_find = os.path.normpath(file_path)
+        current_tab_index = self.results_tabs_widget.indexOf(table)
+
+        for row in range(table.rowCount()):
+            item_data: Any = None
+            if current_tab_index == 0: # ブレ画像タブ
+                item = table.item(row, 0)
+                item_data = item.data(Qt.ItemDataRole.UserRole) if item else None
+                if isinstance(item_data, str) and os.path.normpath(item_data) == normalized_path_to_find:
+                    return row
+            elif current_tab_index == 1: # 類似ペアタブ
+                item = table.item(row, 0)
+                item_data = item.data(Qt.ItemDataRole.UserRole) if item else None
+                if isinstance(item_data, tuple) and len(item_data) == 2:
+                    path1, path2 = item_data
+                    # プレビューでクリックされたパスが path1 または path2 と一致するか確認
+                    if (path1 and os.path.normpath(path1) == normalized_path_to_find) or \
+                       (path2 and os.path.normpath(path2) == normalized_path_to_find):
+                        return row
+            elif current_tab_index == 2: # 重複ペアタブ
+                item = table.item(row, 0)
+                item_data = item.data(Qt.ItemDataRole.UserRole) if item else None
+                if isinstance(item_data, dict) and 'path1' in item_data and 'path2' in item_data:
+                    path1 = item_data['path1']
+                    path2 = item_data['path2']
+                    # プレビューでクリックされたパスが path1 または path2 と一致するか確認
+                    if (path1 and os.path.normpath(path1) == normalized_path_to_find) or \
+                       (path2 and os.path.normpath(path2) == normalized_path_to_find):
+                        return row
+        return -1
+
     def _clear_all_results(self) -> None:
         """結果表示エリアとプレビューをクリアする"""
         self.results_tabs_widget.clear_results()
@@ -645,8 +752,6 @@ class ImageCleanerWindow(QMainWindow):
             )
             return reply == QMessageBox.StandardButton.Yes
         return True
-
-    # ★★★ _confirm_duplicate_deletion は削除 ★★★
 
     def _get_save_filepath(self, current_dir: str) -> Optional[str]:
         """結果保存用のファイルパスをユーザーに選択させる"""
@@ -688,16 +793,15 @@ class ImageCleanerWindow(QMainWindow):
             files_to_delete = self.results_tabs_widget.get_selected_blurry_paths()
             msg = "削除対象のブレ画像がチェックされていません。"
         elif current_tab_index == 1: # 類似ペアタブ
-            # 選択されたペアのファイル2を削除対象とする
             selected_rows: Set[int] = set(item.row() for item in self.results_tabs_widget.similar_table.selectedItems())
             for row in selected_rows:
                 item = self.results_tabs_widget.similar_table.item(row, 0)
                 path_data: Any = item.data(Qt.ItemDataRole.UserRole) if item else None
                 if isinstance(path_data, tuple) and len(path_data) == 2 and path_data[1]:
+                    # 存在確認は get_selected... 内で行われる
                     files_to_delete.append(path_data[1])
             msg = "削除対象の類似ペアが選択されていません。"
-        elif current_tab_index == 2: # 重複ペアタブ (修正後)
-            # 選択されたペアのファイル2を削除対象とする
+        elif current_tab_index == 2: # 重複ペアタブ
             files_to_delete = self.results_tabs_widget.get_selected_duplicate_paths()
             msg = "削除対象の重複ペアが選択されていません。"
         elif current_tab_index == 3: # エラータブ
@@ -714,18 +818,12 @@ class ImageCleanerWindow(QMainWindow):
         """指定されたファイルリストをゴミ箱に移動し、UIを更新する"""
         if not files_to_delete:
             return []
-
-        deleted_count: int
-        errors: List[ErrorDict]
-        files_actually_deleted: Set[str]
+        deleted_count: int; errors: List[ErrorDict]; files_actually_deleted: Set[str]
         deleted_count, errors, files_actually_deleted = delete_files_to_trash(files_to_delete, self)
-
         if files_actually_deleted:
             print(f"UI Update: Removing {len(files_actually_deleted)} items from tables.")
             self.results_tabs_widget.remove_items_by_paths(files_actually_deleted)
-            self.preview_widget.clear_previews()
             self.results_saved = False
-
         return errors
 
     def _set_scan_controls_enabled(self, enabled: bool) -> None:
@@ -737,7 +835,7 @@ class ImageCleanerWindow(QMainWindow):
         """結果に対するアクションボタンの有効/無効を設定"""
         self.delete_button.setEnabled(enabled)
         self.select_all_blurry_button.setEnabled(enabled)
-        self.select_all_duplicates_button.setEnabled(enabled) # 名前変更済み
+        self.select_all_duplicates_button.setEnabled(enabled)
         self.deselect_all_button.setEnabled(enabled)
         self.save_results_button.setEnabled(enabled)
 
@@ -755,10 +853,8 @@ class ImageCleanerWindow(QMainWindow):
                 self.scan_button.setVisible(not cancel_enabled)
             else:
                 self.scan_button.setVisible(scan_enabled)
-
         if actions_enabled is not None:
             self._set_action_buttons_enabled(actions_enabled)
-
         if cancel_enabled is not None:
             self.cancel_button.setVisible(cancel_enabled)
             self.cancel_button.setEnabled(cancel_enabled)
