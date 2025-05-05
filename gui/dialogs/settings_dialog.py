@@ -1,11 +1,14 @@
 # gui/dialogs/settings_dialog.py
 import math
 import copy
+import functools # ★ functools をインポート ★
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLabel, QDoubleSpinBox, QSpinBox,
     QDialogButtonBox, QCheckBox, QGroupBox, QWidget, QComboBox,
-    QHBoxLayout, QPushButton, QLineEdit, QMessageBox, QInputDialog
+    QHBoxLayout, QPushButton, QLineEdit, QMessageBox, QInputDialog,
+    QToolButton, QStyle # ★ QToolButton, QStyle をインポート ★
 )
+from PySide6.QtGui import QIcon # ★ QIcon をインポート ★
 from PySide6.QtCore import Qt, Slot
 from typing import Dict, Any, Union, Optional
 
@@ -25,6 +28,41 @@ SIMILARITY_MODES: Dict[str, str] = {
     "orb_only": "ORB のみ (低速だが高精度)"
 }
 
+# ★★★ ヘルプテキスト定義 ★★★
+HELP_TEXTS = {
+    "scan_subdirectories": "オンにすると、選択したフォルダ内のサブフォルダも再帰的にスキャン対象とします。",
+    "blur_algorithm": "画像のブレ（ボケ）を検出する方法を選択します。\n\n"
+                      "- FFT: 画像全体の周波数成分を分析します。比較的大きなボケや全体的なシャープネスの欠如に有効です。\n"
+                      "- Laplacian: 画像のエッジ（輪郭）の鋭さを評価します。ピンボケのような細かいボケの検出に向いています。",
+    "blur_threshold_fft": "FFTアルゴリズム使用時の閾値です (0-100)。\n"
+                          "値が低いほど「ブレている」と判定されやすくなります。\n"
+                          "画像内の高周波成分の割合に基づいて計算され、値が低いほど高周波成分が少ない（=ブレている可能性が高い）ことを示します。\n"
+                          "デフォルトは80です。",
+    "blur_threshold_laplacian": "Laplacianアルゴリズム使用時の閾値です。\n"
+                                "値が低いほど「ブレている」と判定されやすくなります。\n"
+                                "画像のエッジの分散（ばらつき）を表し、値が低いほどエッジが不明瞭（=ブレている可能性が高い）ことを示します。\n"
+                                "デフォルトは100です。",
+    "similarity_mode": "類似画像を検出する方法を選択します。\n\n"
+                       "- pHash + ORB (推奨): まずpHashで高速に候補を絞り込み、その後ORBで詳細に比較します。速度と精度のバランスが良いです。\n"
+                       "- pHash のみ: pHash（知覚ハッシュ）のみで比較します。非常に高速ですが、画像の回転や若干の変形には弱い場合があります。\n"
+                       "- ORB のみ: ORB特徴量のみで比較します。回転や拡大縮小、明るさの変化に比較的強いですが、処理速度は遅くなります。",
+    "hash_threshold": "pHashモード（pHash+ORB または pHashのみ）で使用するハミング距離の閾値です (0-100)。\n"
+                      "2つの画像のpHash間のビット差の数を表します。\n"
+                      "値が小さいほど、より厳密に類似している画像のみを検出します。\n"
+                      "デフォルトは5です。",
+    "orb_features": "ORBモード（pHash+ORB または ORBのみ）で使用する特徴点の最大数です。\n"
+                    "値を大きくすると、より多くの特徴点を検出しようとしますが、処理時間が増加します。\n"
+                    "デフォルトは1500です。",
+    "orb_ratio": "ORBモード（pHash+ORB または ORBのみ）で使用するRatio Testの閾値です (0-100)。\n"
+                 "特徴点マッチングの精度を上げるためのパラメータです。\n"
+                 "値が小さいほど、より信頼性の高いマッチングのみを採用しますが、検出されるペアが減る可能性があります。\n"
+                 "デフォルトは70です。",
+    "orb_min_matches": "ORBモード（pHash+ORB または ORBのみ）で「類似している」と判定するために必要な、最低限のマッチした特徴点の数です。\n"
+                       "値が大きいほど、より多くの特徴点が一致した場合のみ類似と判定します。\n"
+                       "デフォルトは40です。"
+}
+# ★★★★★★★★★★★★★★★★★★★
+
 class SettingsDialog(QDialog):
     """アプリケーションの設定を行うダイアログ"""
     def __init__(self, current_settings: SettingsDict, parent: Optional[QWidget] = None):
@@ -35,7 +73,7 @@ class SettingsDialog(QDialog):
         self.current_settings = copy.deepcopy(current_settings)
         self.presets: Dict[str, SettingsDict] = self.current_settings.get('presets', {})
 
-        # ウィジェットの型ヒント
+        # ウィジェットの型ヒント (変更なし)
         self.scan_subdirectories_checkbox: QCheckBox
         self.blur_algorithm_label: QLabel; self.blur_algorithm_combobox: QComboBox
         self.blur_threshold_label: QLabel; self.blur_threshold_spinbox: QSpinBox
@@ -55,6 +93,41 @@ class SettingsDialog(QDialog):
         self._update_blur_threshold_visibility()
         self._update_similarity_options_visibility()
         self._populate_preset_combobox()
+
+    # ★★★ ヘルプボタン付きウィジェット作成関数 ★★★
+    def _create_widget_with_help(self, widget: QWidget, help_text: str) -> QWidget:
+        """設定ウィジェットとヘルプボタンを横に並べたレイアウトを作成する"""
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0) # マージンをなくす
+        layout.setSpacing(5) # ウィジェットとボタンの間隔
+
+        layout.addWidget(widget, 1) # ウィジェットが伸びるようにする
+
+        help_button = QToolButton(self)
+        # 標準のヘルプアイコンを設定
+        icon = self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxQuestion)
+        if icon.isNull(): # 標準アイコンが取得できない場合のフォールバック
+             help_button.setText("?")
+        else:
+            help_button.setIcon(icon)
+        help_button.setToolTip("この設定項目の説明を表示します")
+        # functools.partial を使って、クリック時に表示するテキストを渡す
+        help_button.clicked.connect(functools.partial(self._show_help_message, help_text))
+
+        layout.addWidget(help_button)
+
+        # レイアウトを含むQWidgetを返す（QFormLayoutにはQWidgetまたはQLayoutを追加できる）
+        container = QWidget()
+        container.setLayout(layout)
+        return container
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+    # ★★★ ヘルプメッセージ表示スロット ★★★
+    @Slot(str)
+    def _show_help_message(self, message: str):
+        """ヘルプボタンがクリックされたときにメッセージボックスを表示する"""
+        QMessageBox.information(self, "ヘルプ", message)
+    # ★★★★★★★★★★★★★★★★★★★★★★★
 
     def _setup_ui(self) -> None:
         """UI要素の作成と配置"""
@@ -90,7 +163,8 @@ class SettingsDialog(QDialog):
         general_layout = QFormLayout(general_group)
         self.scan_subdirectories_checkbox = QCheckBox("サブディレクトリもスキャンする")
         self.scan_subdirectories_checkbox.setChecked(bool(self.current_settings.get('scan_subdirectories', False)))
-        general_layout.addRow(self.scan_subdirectories_checkbox)
+        # ★ ヘルプボタン付きで追加 ★
+        general_layout.addRow(self._create_widget_with_help(self.scan_subdirectories_checkbox, HELP_TEXTS["scan_subdirectories"]))
         main_layout.addWidget(general_group)
 
         # --- ブレ検出設定 ---
@@ -105,7 +179,8 @@ class SettingsDialog(QDialog):
             if key == current_blur_algo: selected_index_blur = i
         self.blur_algorithm_combobox.setCurrentIndex(selected_index_blur)
         self.blur_algorithm_combobox.currentIndexChanged.connect(self._update_blur_threshold_visibility)
-        blur_layout.addRow(self.blur_algorithm_label, self.blur_algorithm_combobox)
+        # ★ ヘルプボタン付きで追加 ★
+        blur_layout.addRow(self.blur_algorithm_label, self._create_widget_with_help(self.blur_algorithm_combobox, HELP_TEXTS["blur_algorithm"]))
 
         self.blur_threshold_label = QLabel("FFT 閾値 (0-100, 低いほどブレ):")
         self.blur_threshold_spinbox = QSpinBox()
@@ -113,22 +188,20 @@ class SettingsDialog(QDialog):
         self.blur_threshold_spinbox.setSingleStep(1)
         default_fft_float = float(self.current_settings.get('blur_threshold', 0.80))
         self.blur_threshold_spinbox.setValue(math.floor(default_fft_float * 100))
-        # ★★★ 最小サイズを設定 ★★★
         self.blur_threshold_spinbox.setMinimumWidth(120)
         self.blur_threshold_spinbox.setMinimumHeight(25)
-        # ★★★★★★★★★★★★★★★★★
-        blur_layout.addRow(self.blur_threshold_label, self.blur_threshold_spinbox)
+        # ★ ヘルプボタン付きで追加 ★
+        blur_layout.addRow(self.blur_threshold_label, self._create_widget_with_help(self.blur_threshold_spinbox, HELP_TEXTS["blur_threshold_fft"]))
 
         self.blur_laplacian_threshold_label = QLabel("Laplacian 閾値 (低いほどブレ):")
         self.blur_laplacian_threshold_spinbox = QSpinBox()
         self.blur_laplacian_threshold_spinbox.setRange(0, 10000)
         self.blur_laplacian_threshold_spinbox.setSingleStep(10)
         self.blur_laplacian_threshold_spinbox.setValue(int(self.current_settings.get('blur_laplacian_threshold', 100)))
-        # ★★★ 最小サイズを設定 ★★★
         self.blur_laplacian_threshold_spinbox.setMinimumWidth(120)
         self.blur_laplacian_threshold_spinbox.setMinimumHeight(25)
-        # ★★★★★★★★★★★★★★★★★
-        blur_layout.addRow(self.blur_laplacian_threshold_label, self.blur_laplacian_threshold_spinbox)
+        # ★ ヘルプボタン付きで追加 ★
+        blur_layout.addRow(self.blur_laplacian_threshold_label, self._create_widget_with_help(self.blur_laplacian_threshold_spinbox, HELP_TEXTS["blur_threshold_laplacian"]))
         main_layout.addWidget(blur_group)
 
         # --- 類似ペア検出設定 ---
@@ -143,7 +216,8 @@ class SettingsDialog(QDialog):
             if key == current_sim_mode: selected_index_sim = i
         self.similarity_mode_combobox.setCurrentIndex(selected_index_sim)
         self.similarity_mode_combobox.currentIndexChanged.connect(self._update_similarity_options_visibility)
-        similar_layout.addRow(self.similarity_mode_label, self.similarity_mode_combobox)
+        # ★ ヘルプボタン付きで追加 ★
+        similar_layout.addRow(self.similarity_mode_label, self._create_widget_with_help(self.similarity_mode_combobox, HELP_TEXTS["similarity_mode"]))
 
         self.hash_threshold_label = QLabel("pHash ハミング距離閾値 (0-100):")
         self.hash_threshold_spinbox = QSpinBox()
@@ -151,20 +225,19 @@ class SettingsDialog(QDialog):
         self.hash_threshold_spinbox.setSingleStep(1)
         default_phash = int(self.current_settings.get('hash_threshold', 5))
         self.hash_threshold_spinbox.setValue(min(max(default_phash, 0), 100))
-        # ★★★ 最小サイズを設定 ★★★
         self.hash_threshold_spinbox.setMinimumWidth(120)
         self.hash_threshold_spinbox.setMinimumHeight(25)
-        # ★★★★★★★★★★★★★★★★★
-        similar_layout.addRow(self.hash_threshold_label, self.hash_threshold_spinbox)
+        # ★ ヘルプボタン付きで追加 ★
+        similar_layout.addRow(self.hash_threshold_label, self._create_widget_with_help(self.hash_threshold_spinbox, HELP_TEXTS["hash_threshold"]))
 
         similar_layout.addRow(QLabel("-" * 30)) # 区切り線
         self.orb_features_label = QLabel("ORB 特徴点数:")
         self.orb_features_spinbox = QSpinBox()
         self.orb_features_spinbox.setRange(100, 10000); self.orb_features_spinbox.setSingleStep(100); self.orb_features_spinbox.setValue(int(self.current_settings.get('orb_nfeatures', 1500)))
-        # ★★★ 最小サイズを設定 ★★★
         self.orb_features_spinbox.setMinimumWidth(120)
         self.orb_features_spinbox.setMinimumHeight(25)
-        # ★★★★★★★★★★★★★★★★★
+        # ★ ヘルプボタン付きで追加 ★
+        similar_layout.addRow(self.orb_features_label, self._create_widget_with_help(self.orb_features_spinbox, HELP_TEXTS["orb_features"]))
 
         self.orb_ratio_label = QLabel("ORB Ratio Test 閾値 (0-100):")
         self.orb_ratio_spinbox = QSpinBox()
@@ -172,21 +245,18 @@ class SettingsDialog(QDialog):
         self.orb_ratio_spinbox.setSingleStep(1)
         default_orb_ratio_float = float(self.current_settings.get('orb_ratio_threshold', 0.70))
         self.orb_ratio_spinbox.setValue(math.floor(default_orb_ratio_float * 100))
-        # ★★★ 最小サイズを設定 ★★★
         self.orb_ratio_spinbox.setMinimumWidth(120)
         self.orb_ratio_spinbox.setMinimumHeight(25)
-        # ★★★★★★★★★★★★★★★★★
+        # ★ ヘルプボタン付きで追加 ★
+        similar_layout.addRow(self.orb_ratio_label, self._create_widget_with_help(self.orb_ratio_spinbox, HELP_TEXTS["orb_ratio"]))
 
         self.orb_min_matches_label = QLabel("ORB 最小マッチ数:")
         self.orb_min_matches_spinbox = QSpinBox()
         self.orb_min_matches_spinbox.setRange(5, 500); self.orb_min_matches_spinbox.setSingleStep(1); self.orb_min_matches_spinbox.setValue(int(self.current_settings.get('min_good_matches', 40)))
-        # ★★★ 最小サイズを設定 ★★★
         self.orb_min_matches_spinbox.setMinimumWidth(120)
         self.orb_min_matches_spinbox.setMinimumHeight(25)
-        # ★★★★★★★★★★★★★★★★★
-        similar_layout.addRow(self.orb_features_label, self.orb_features_spinbox)
-        similar_layout.addRow(self.orb_ratio_label, self.orb_ratio_spinbox)
-        similar_layout.addRow(self.orb_min_matches_label, self.orb_min_matches_spinbox)
+        # ★ ヘルプボタン付きで追加 ★
+        similar_layout.addRow(self.orb_min_matches_label, self._create_widget_with_help(self.orb_min_matches_spinbox, HELP_TEXTS["orb_min_matches"]))
         main_layout.addWidget(similar_group)
 
         # --- OK / Cancel ボタン ---
