@@ -2,6 +2,7 @@
 import os
 import time
 import json
+import math # ★ 追加 ★
 import concurrent.futures
 from PySide6.QtCore import QRunnable, Signal, QObject, Slot
 from PySide6.QtWidgets import QApplication
@@ -28,11 +29,9 @@ try:
     from core.similarity_detection import find_similar_pairs
     from core.duplicate_detection import find_duplicate_files
     # ★ 型エイリアス定義は上に移動したので、ここでは不要 ★
-    # FindSimilarResult = Tuple[List[SimilarPair], List[ErrorDict], List[ErrorDict]]
-    # FindDuplicateResult = Tuple[DuplicateDict, List[ErrorDict]]
 except ImportError as e:
     print(f"エラー: core モジュールのインポートに失敗しました。({e}) ダミー関数を使用します。")
-    # ダミー関数の定義 (変更なし)
+    # ダミー関数
     def calculate_fft_blur_score_v2(path: str, ratio: float = 0.05) -> BlurResult: return (0.5, None) if "blur" in path.lower() else (0.9, None)
     def calculate_laplacian_variance(path: str) -> BlurResult: return (150.0, None) if "blur" in path.lower() else (50.0, None)
     def find_similar_pairs(image_paths: List[str], duplicate_paths_set: Set[str], similarity_mode: str = 'phash_orb', signals: Optional[Any] = None, progress_offset: int = 0, progress_range: int = 100, **kwargs: Any) -> FindSimilarResult: return [], [], []
@@ -42,7 +41,6 @@ except ImportError as e:
 try:
     from utils.results_handler import save_scan_state, load_scan_state, delete_scan_state, get_state_filepath
 except ImportError:
-    # (フォールバック関数は変更なし)
     print("エラー: utils.results_handler から状態管理関数のインポートに失敗しました。")
     def save_scan_state(dir_path: str, state_data: ScanStateData) -> bool: print("警告: 状態保存機能が無効"); return False
     def load_scan_state(dir_path: str) -> Tuple[Optional[ScanStateData], Optional[str]]: print("警告: 状態読み込み機能が無効"); return None, "状態読み込み機能が無効です"
@@ -165,7 +163,6 @@ class ScanWorker(QRunnable):
                     for filename in files:
                         if filename.lower().endswith(self.file_extensions):
                             full_path: str = os.path.join(root, filename)
-                            # isfile() でファイルかどうかを確認
                             if os.path.isfile(full_path):
                                 image_paths.append(full_path)
             else:
@@ -174,7 +171,6 @@ class ScanWorker(QRunnable):
                     if i % 200 == 0: QApplication.processEvents()
                     if filename.lower().endswith(self.file_extensions):
                         full_path = os.path.join(self.directory_path, filename)
-                        # isfile() と islink() でファイルでありリンクでないことを確認
                         if os.path.isfile(full_path) and not os.path.islink(full_path):
                             image_paths.append(full_path)
         except OSError as e: error_msg = f"ディレクトリ読み込みエラー: {e}"
@@ -184,7 +180,7 @@ class ScanWorker(QRunnable):
         return self.all_image_paths, error_msg
 
     def _process_blur_task(self, img_path: str, blur_detect_func: Callable[[str], BlurResult]) -> BlurTaskResult:
-        # パフォーマンス改善点 3: ファイル名更新頻度を調整
+        # (変更なし)
         current_time = time.time()
         if hasattr(self.signals, 'processing_file') and (current_time - self._last_processing_file_emit_time > self._processing_file_emit_interval):
              self.signals.processing_file.emit(os.path.basename(img_path))
@@ -221,15 +217,37 @@ class ScanWorker(QRunnable):
 
             # --- 1. ブレ検出 (並列化) ---
             blur_algo: str = str(self.settings.get('blur_algorithm', 'fft'))
-            blur_threshold: float; threshold_label: str; blur_detect_func: Callable[[str], BlurResult]
-            if blur_algo == 'laplacian': blur_threshold = float(self.settings.get('blur_laplacian_threshold', 100)); threshold_label = f"Laplacian閾値: {blur_threshold:.1f}"; blur_detect_func = calculate_laplacian_variance
-            else: blur_threshold = float(self.settings.get('blur_threshold', 0.80)); threshold_label = f"FFT閾値: {blur_threshold:.4f}"; blur_detect_func = calculate_fft_blur_score_v2
-            print(f"ブレ検出アルゴリズム: {blur_algo.upper()} (閾値={blur_threshold}), Max Workers: {self.max_workers}")
-            status_prefix_blur: str = f"ブレ検出中 ({blur_algo.upper()})"; last_blur_emit_time: float = 0.0
+            blur_threshold: float # ★ 比較用の閾値は float ★
+            threshold_label: str
+            blur_detect_func: Callable[[str], BlurResult]
+
+            # ★★★ 閾値設定の取得と変換 ★★★
+            if blur_algo == 'laplacian':
+                # Laplacian は設定値 (整数) をそのまま float として使う
+                blur_threshold = float(self.settings.get('blur_laplacian_threshold', 100))
+                threshold_label = f"Laplacian閾値: {blur_threshold:.0f}" # ★ .0f で整数表示 ★
+                blur_detect_func = calculate_laplacian_variance
+            else: # fft
+                # FFT の設定値 (float 0.0-1.0) を取得
+                # settings_dialog で 0-100 の int が 0.0-1.0 の float に変換されて保存されているはず
+                blur_threshold = float(self.settings.get('blur_threshold', 0.80))
+                # 表示用のラベルは 0-100 の整数に戻す
+                threshold_display_int = math.floor(blur_threshold * 100) # ★ 小数点切り捨てで表示 ★
+                threshold_label = f"FFT閾値: {threshold_display_int}" # ★ 表示用ラベル (例: FFT閾値: 80) ★
+                blur_detect_func = calculate_fft_blur_score_v2
+            # ★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+            # ★ ログ出力も比較閾値(float)を表示 ★
+            print(f"ブレ検出アルゴリズム: {blur_algo.upper()} (比較閾値={blur_threshold:.4f}), Max Workers: {self.max_workers}")
+            status_prefix_blur: str = f"ブレ検出中 ({blur_algo.upper()})"
+            last_blur_emit_time: float = 0.0
             processed_count_blur: int = len(self.processed_paths_blur)
+            # ★ ラベル表示は threshold_label (例: "FFT閾値: 80") を使う ★
             self.signals.status_update.emit(f"{status_prefix_blur} ({threshold_label}) ({processed_count_blur}/{num_images})")
+
             tasks_to_run_blur: List[str] = [p for p in image_paths if p not in self.processed_paths_blur]; num_tasks_blur: int = len(tasks_to_run_blur)
             print(f"ブレ検出対象: {num_tasks_blur} ファイル")
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 futures = [executor.submit(self._process_blur_task, path, blur_detect_func) for path in tasks_to_run_blur]
                 for future in concurrent.futures.as_completed(futures):
@@ -240,14 +258,20 @@ class ScanWorker(QRunnable):
                         self.processed_paths_blur.add(img_path); processed_count_blur += 1
                         if error_msg is not None:
                             if error_msg != "処理中断": self.processing_errors.append({'type': f'ブレ検出({blur_algo})', 'path': os.path.basename(img_path), 'error': error_msg})
-                        elif score is not None and score <= blur_threshold: self.blurry_results.append({"path": img_path, "score": score})
+                        # ★★★ スコアと比較閾値 (blur_threshold: float) で比較 ★★★
+                        elif score is not None and score <= blur_threshold:
+                            self.blurry_results.append({"path": img_path, "score": score})
+                        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
                         progress: int = current_progress + int((processed_count_blur / num_images) * PROGRESS_BLUR_DETECT); current_time: float = time.time()
                         if processed_count_blur % 50 == 0: QApplication.processEvents()
                         if processed_count_blur % self.state_save_interval == 0: self._save_state()
                         if processed_count_blur == num_images or current_time - last_blur_emit_time > 0.2:
-                             self.signals.progress_update.emit(progress); self.signals.status_update.emit(f"{status_prefix_blur} ({processed_count_blur}/{num_images})"); last_blur_emit_time = current_time
+                             # ★ ステータス表示も threshold_label を使う ★
+                             self.signals.progress_update.emit(progress); self.signals.status_update.emit(f"{status_prefix_blur} ({threshold_label}) ({processed_count_blur}/{num_images})"); last_blur_emit_time = current_time
                     except concurrent.futures.CancelledError: print("ブレ検出タスクがキャンセルされました。")
                     except Exception as exc: print(f'ブレ検出タスクで予期せぬ例外が発生: {exc}'); self.processing_errors.append({'type': f'ブレ検出({blur_algo})(致命的)', 'path': '不明', 'error': str(exc)}); processed_count_blur += 1
+
             if hasattr(self.signals, 'processing_file'): self.signals.processing_file.emit("")
             current_progress += PROGRESS_BLUR_DETECT; self.signals.progress_update.emit(current_progress)
             if not self._cancellation_requested: self._save_state()
@@ -280,14 +304,18 @@ class ScanWorker(QRunnable):
             # --- 3. 類似ペア検出 ---
             similarity_mode: str = str(self.settings.get('similarity_mode', 'phash_orb'))
             orb_nfeatures: int = int(self.settings.get('orb_nfeatures', 1500)); orb_ratio_threshold: float = float(self.settings.get('orb_ratio_threshold', 0.70))
-            min_good_matches: int = int(self.settings.get('min_good_matches', 40)); hash_threshold: int = int(self.settings.get('hash_threshold', 5))
+            min_good_matches: int = int(self.settings.get('min_good_matches', 40))
+            # ★★★ pHash 閾値 (0-100 の整数) をそのまま取得 ★★★
+            hash_threshold: int = int(self.settings.get('hash_threshold', 5))
+            # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
             status_msg: str = f"類似ペア検出中 (モード: {similarity_mode.replace('_', ' ').title()}, 重複除外)"
             self.signals.status_update.emit(status_msg)
             try:
                 sim_pairs_current, comp_errors_current, _ = find_similar_pairs(
                     image_paths, duplicate_paths_set=duplicate_paths_set, similarity_mode=similarity_mode,
                     orb_nfeatures=orb_nfeatures, orb_ratio_threshold=orb_ratio_threshold,
-                    min_good_matches_threshold=min_good_matches, hash_threshold=hash_threshold,
+                    min_good_matches_threshold=min_good_matches, hash_threshold=hash_threshold, # ★ hash_threshold はそのまま渡す ★
                     signals=self.signals, progress_offset=current_progress,
                     progress_range=PROGRESS_SIMILAR_DETECT,
                     is_cancelled_func=lambda: self._cancellation_requested,
