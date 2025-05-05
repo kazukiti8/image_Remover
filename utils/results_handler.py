@@ -1,18 +1,19 @@
 # utils/results_handler.py
 import json
 import os
+import numpy as np # ★ NumPy をインポート ★
 from datetime import datetime
-from typing import Dict, List, Tuple, Optional, Any, Union, Set # ★ Set をインポート ★
+from typing import Dict, List, Tuple, Optional, Any, Union, Set
 
 # 結果データのバージョン
 RESULTS_FORMAT_VERSION: str = "1.0"
-# ★ 状態データのバージョン ★
+# 状態データのバージョン
 STATE_FORMAT_VERSION: str = "1.0"
-# ★ 状態ファイル名 ★
+# 状態ファイル名
 STATE_FILENAME: str = ".image_cleaner_scan_state.json"
 
 # --- 型エイリアス ---
-BlurResultItem = Dict[str, Union[str, float]]
+BlurResultItem = Dict[str, Union[str, float]] # 保存時は float になる想定
 SimilarResultItem = List[Union[str, int]]
 DuplicateResultDict = Dict[str, List[str]]
 ErrorResultItem = Dict[str, str]
@@ -20,24 +21,35 @@ ResultsData = Dict[str, Union[List[BlurResultItem], List[SimilarResultItem], Dup
 SettingsData = Dict[str, Any]
 LoadResult = Tuple[Optional[ResultsData], Optional[str], Optional[SettingsData], Optional[str]]
 
-# ★ スキャン状態データの型エイリアス ★
 ScanStateData = Dict[str, Any]
-# ScanStateData の具体的なキーの例 (ScanWorker で定義・使用):
-# {
-#     "format_version": str,
-#     "save_timestamp": str,
-#     "target_directory": str,
-#     "settings_used": SettingsData,
-#     "all_image_paths": List[str],
-#     "processed_paths_blur": List[str], # JSON互換のためSetではなくListで保存
-#     "processed_hashes": Dict[str, str], # path -> hash
-#     "compared_pairs_similar": List[List[str]], # JSON互換のためSet[Tuple[str,str]]ではなくList[List[str]]
-#     "blurry_results": List[BlurResultItem],
-#     "duplicate_results": DuplicateResultDict,
-#     "similar_pair_results": List[SimilarResultItem],
-#     "processing_errors": List[ErrorResultItem]
-# }
-LoadStateResult = Tuple[Optional[ScanStateData], Optional[str]] # (state_data, error_message)
+LoadStateResult = Tuple[Optional[ScanStateData], Optional[str]]
+
+# ★★★ NumPy型をPython標準型に変換するヘルパー関数 ★★★
+def convert_numpy_types(obj: Any) -> Any:
+    """
+    データ内のNumPy数値型をPython標準型に再帰的に変換する。
+    JSONシリアライズ可能な形式にするため。
+    """
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        # float32 や float64 を通常の float に変換
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        # NumPy配列はリストに変換
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        # 辞書の場合は各値を再帰的に変換
+        return {k: convert_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        # リストやタプルの場合は各要素を再帰的に変換
+        return [convert_numpy_types(elem) for elem in obj]
+    elif isinstance(obj, set):
+         # セットの場合はリストに変換してから各要素を再帰的に変換
+         return [convert_numpy_types(elem) for elem in sorted(list(obj))]
+    # その他の型はそのまま返す
+    return obj
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 # --- 結果ファイルの保存・読み込み (変更なし) ---
 def save_results_to_file(filepath: str,
@@ -46,13 +58,16 @@ def save_results_to_file(filepath: str,
                          settings_used: Optional[SettingsData] = None) -> bool:
     """スキャン結果を指定されたJSONファイルに保存します。"""
     try:
-        data_to_save: Dict[str, Any] = {
+        # ★ 保存前にNumPy型を変換 ★
+        data_to_save_raw: Dict[str, Any] = {
             "format_version": RESULTS_FORMAT_VERSION,
             "save_timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "scanned_directory": scanned_directory,
             "settings_used": settings_used if settings_used else {},
             "results": results_data
         }
+        data_to_save = convert_numpy_types(data_to_save_raw)
+
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(data_to_save, f, ensure_ascii=False, indent=4)
         print(f"結果を保存しました: {filepath}")
@@ -119,15 +134,19 @@ def save_scan_state(directory_path: str, state_data: ScanStateData) -> bool:
         state_data["format_version"] = STATE_FORMAT_VERSION
         state_data["save_timestamp"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        # JSON互換性のためにSetをListに変換 (呼び出し元で行う方が良い場合もある)
-        if "processed_paths_blur" in state_data and isinstance(state_data["processed_paths_blur"], set):
-            state_data["processed_paths_blur"] = sorted(list(state_data["processed_paths_blur"]))
-        if "compared_pairs_similar" in state_data and isinstance(state_data["compared_pairs_similar"], set):
-             # Set[Tuple[str, str]] -> List[List[str]]
-             state_data["compared_pairs_similar"] = sorted([list(pair) for pair in state_data["compared_pairs_similar"]])
+        # --- ★★★ JSON保存前にNumPy型を変換 ★★★ ---
+        state_data_serializable = convert_numpy_types(state_data)
+        # -----------------------------------------
+
+        # JSON互換性のためにSetをListに変換 (convert_numpy_types で処理される)
+        # if "processed_paths_blur" in state_data_serializable and isinstance(state_data_serializable["processed_paths_blur"], set):
+        #     state_data_serializable["processed_paths_blur"] = sorted(list(state_data_serializable["processed_paths_blur"]))
+        # if "compared_pairs_similar" in state_data_serializable and isinstance(state_data_serializable["compared_pairs_similar"], set):
+        #      state_data_serializable["compared_pairs_similar"] = sorted([list(pair) for pair in state_data_serializable["compared_pairs_similar"]])
 
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(state_data, f, ensure_ascii=False, indent=4)
+            # ★ 変換後のデータをダンプ ★
+            json.dump(state_data_serializable, f, ensure_ascii=False, indent=4)
         print(f"スキャン状態を保存しました: {filepath}")
         return True
     except OSError as e:
@@ -135,10 +154,17 @@ def save_scan_state(directory_path: str, state_data: ScanStateData) -> bool:
         return False
     except TypeError as e:
         print(f"エラー: 状態データのJSONシリアライズ失敗 (TypeError: {e})")
-        # 問題のあるキーと値を特定するデバッグコードを追加すると役立つ
-        # for k, v in state_data.items():
-        #     try: json.dumps({k: v})
-        #     except TypeError: print(f"  シリアライズ不可: key='{k}', type={type(v)}")
+        # 問題のあるキーと値を特定するデバッグコード
+        # try:
+        #     convert_numpy_types(state_data) # 変換自体でエラーが出るか確認
+        # except Exception as conv_e:
+        #      print(f"  NumPy型変換中にエラー: {conv_e}")
+
+        # 変換後のデータでシリアライズ不可なものを探す
+        # state_data_serializable = convert_numpy_types(state_data)
+        # for k, v in state_data_serializable.items():
+        #      try: json.dumps({k: v})
+        #      except TypeError: print(f"  シリアライズ不可(変換後): key='{k}', type={type(v)}")
         return False
     except Exception as e:
         print(f"エラー: 状態ファイル保存中に予期せぬエラー ({type(e).__name__}: {e}) - {filepath}")
@@ -158,20 +184,19 @@ def load_scan_state(directory_path: str) -> LoadStateResult:
         if not isinstance(loaded_data, dict):
             return None, "無効な状態ファイル形式 (トップレベル非オブジェクト)。"
         if loaded_data.get("target_directory") != directory_path:
-            # ディレクトリが一致しない場合は無効な状態とみなす
             return None, "状態ファイルの対象ディレクトリが一致しません。"
         if loaded_data.get("format_version") != STATE_FORMAT_VERSION:
             print(f"警告: 状態ファイルのバージョン不一致 (ファイル: {loaded_data.get('format_version')}, アプリ: {STATE_FORMAT_VERSION})。互換性がない可能性があります。")
-            # ここでエラーにするか、続行するかは要件次第
 
         # JSONから読み込んだListをSetに変換 (必要に応じて)
+        # processed_paths_blur は set に戻す
         if "processed_paths_blur" in loaded_data and isinstance(loaded_data["processed_paths_blur"], list):
             loaded_data["processed_paths_blur"] = set(loaded_data["processed_paths_blur"])
+        # compared_pairs_similar は set[tuple] に戻す
         if "compared_pairs_similar" in loaded_data and isinstance(loaded_data["compared_pairs_similar"], list):
-            # List[List[str]] -> Set[Tuple[str, str]]
              try:
-                 # frozenset にしないと set の要素にできない
-                 loaded_data["compared_pairs_similar"] = set(tuple(sorted(pair)) for pair in loaded_data["compared_pairs_similar"] if len(pair)==2)
+                 # frozenset にしないと set の要素にできないため、tuple(sorted(...)) を使う
+                 loaded_data["compared_pairs_similar"] = set(tuple(sorted(pair)) for pair in loaded_data["compared_pairs_similar"] if isinstance(pair, list) and len(pair)==2)
              except TypeError:
                  print("警告: compared_pairs_similar の形式が不正です。")
                  loaded_data["compared_pairs_similar"] = set() # 空にする
@@ -201,9 +226,4 @@ def delete_scan_state(directory_path: str) -> bool:
             print(f"エラー: 状態ファイル削除中に予期せぬエラー ({type(e).__name__}: {e}) - {filepath}")
             return False
     else:
-        # ファイルが存在しない場合は削除成功とみなす
-        # print(f"状態ファイルは存在しませんでした: {filepath}")
         return True
-
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-

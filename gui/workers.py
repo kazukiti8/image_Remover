@@ -7,41 +7,49 @@ from PySide6.QtCore import QRunnable, Signal, QObject, Slot
 from PySide6.QtWidgets import QApplication
 from typing import Tuple, Optional, List, Dict, Any, Union, Set, Callable
 
-# 型エイリアス (変更なし)
+# ★★★ 型エイリアス定義をここに移動 ★★★
 SettingsDict = Dict[str, Union[float, bool, int, str]]
 BlurResultItem = Dict[str, Union[str, float]]
-SimilarPair = Tuple[str, str, int]
-DuplicateDict = Dict[str, List[str]]
-ErrorDict = Dict[str, str]
-ScanStateData = Dict[str, Any]
-BlurResult = Tuple[Optional[float], Optional[str]]
-BlurTaskResult = Tuple[str, Optional[float], Optional[str]]
+SimilarPair = Tuple[str, str, int] # (path1, path2, score) - find_similar_pairs の戻り値用
+DuplicateDict = Dict[str, List[str]] # {hash: [path1, path2, ...]}
+ErrorDict = Dict[str, str] # {'type': str, 'path': str, 'error': str}
+ScanStateData = Dict[str, Any] # スキャン状態保存用
+BlurResult = Tuple[Optional[float], Optional[str]] # (score, error_msg) - ブレ計算関数の戻り値
+BlurTaskResult = Tuple[str, Optional[float], Optional[str]] # (path, score, error_msg) - ブレ検出タスクの結果
+# find_similar_pairs の戻り値の型 (SimilarPair を使うので下に定義)
+FindSimilarResult = Tuple[List[SimilarPair], List[ErrorDict], List[ErrorDict]]
+# find_duplicate_files の戻り値の型
+FindDuplicateResult = Tuple[DuplicateDict, List[ErrorDict]]
+# ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-# --- コアロジックの関数をインポート (変更なし) ---
+# --- コアロジックの関数をインポート ---
 try:
     from core.blur_detection import calculate_fft_blur_score_v2, calculate_laplacian_variance
     from core.similarity_detection import find_similar_pairs
     from core.duplicate_detection import find_duplicate_files
-    FindSimilarResult = Tuple[List[SimilarPair], List[ErrorDict], List[ErrorDict]]
-    FindDuplicateResult = Tuple[DuplicateDict, List[ErrorDict]]
+    # ★ 型エイリアス定義は上に移動したので、ここでは不要 ★
+    # FindSimilarResult = Tuple[List[SimilarPair], List[ErrorDict], List[ErrorDict]]
+    # FindDuplicateResult = Tuple[DuplicateDict, List[ErrorDict]]
 except ImportError as e:
     print(f"エラー: core モジュールのインポートに失敗しました。({e}) ダミー関数を使用します。")
+    # ダミー関数の定義 (変更なし)
     def calculate_fft_blur_score_v2(path: str, ratio: float = 0.05) -> BlurResult: return (0.5, None) if "blur" in path.lower() else (0.9, None)
     def calculate_laplacian_variance(path: str) -> BlurResult: return (150.0, None) if "blur" in path.lower() else (50.0, None)
     def find_similar_pairs(image_paths: List[str], duplicate_paths_set: Set[str], similarity_mode: str = 'phash_orb', signals: Optional[Any] = None, progress_offset: int = 0, progress_range: int = 100, **kwargs: Any) -> FindSimilarResult: return [], [], []
     def find_duplicate_files(image_paths: List[str], signals: Optional[Any] = None, progress_offset: int = 0, progress_range: int = 100, **kwargs: Any) -> FindDuplicateResult: return {}, []
 
-# --- 状態ハンドラ関数をインポート (変更なし) ---
+# --- 状態ハンドラ関数をインポート ---
 try:
     from utils.results_handler import save_scan_state, load_scan_state, delete_scan_state, get_state_filepath
 except ImportError:
+    # (フォールバック関数は変更なし)
     print("エラー: utils.results_handler から状態管理関数のインポートに失敗しました。")
     def save_scan_state(dir_path: str, state_data: ScanStateData) -> bool: print("警告: 状態保存機能が無効"); return False
     def load_scan_state(dir_path: str) -> Tuple[Optional[ScanStateData], Optional[str]]: print("警告: 状態読み込み機能が無効"); return None, "状態読み込み機能が無効です"
     def delete_scan_state(dir_path: str) -> bool: print("警告: 状態削除機能が無効"); return False
     def get_state_filepath(dir_path: str) -> str: return os.path.join(dir_path, ".image_cleaner_scan_state.json")
 
-# --- CacheHandler をインポート (変更なし) ---
+# --- CacheHandler をインポート ---
 try:
     from utils.cache_handler import CacheHandler
 except ImportError:
@@ -51,15 +59,13 @@ except ImportError:
 # === バックグラウンド処理用のシグナル定義 ===
 class WorkerSignals(QObject):
     """バックグラウンド処理からのシグナルを定義するクラス"""
-    status_update = Signal(str)       # 全体的なステータスメッセージ (例: "ブレ検出中 (50/100)")
-    progress_update = Signal(int)     # プログレスバーの更新 (0-100)
-    # ★★★ 現在処理中のファイル名を通知するシグナルを追加 ★★★
-    processing_file = Signal(str)     # 現在処理中のファイル名 (basename)
-    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    results_ready = Signal(list, list, dict, list) # (blurry, similar, duplicates, errors)
-    error = Signal(str)               # 致命的なエラーメッセージ
-    finished = Signal()               # 正常完了
-    cancelled = Signal()              # 中断完了
+    status_update = Signal(str)
+    progress_update = Signal(int)
+    processing_file = Signal(str)
+    results_ready = Signal(list, list, dict, list)
+    error = Signal(str)
+    finished = Signal()
+    cancelled = Signal()
 
 # === バックグラウンド処理実行クラス ===
 class ScanWorker(QRunnable):
@@ -72,7 +78,10 @@ class ScanWorker(QRunnable):
         self.file_extensions: Tuple[str, ...] = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp', '.heic', '.heif')
         self._cancellation_requested: bool = False
         self.state_save_interval: int = 100
-        self.max_workers: Optional[int] = os.cpu_count()
+
+        # パフォーマンス改善点 1: 並列処理数の調整
+        self.max_workers: Optional[int] = max(1, (os.cpu_count() // 2) if os.cpu_count() else 1)
+        print(f"INFO: Using max_workers = {self.max_workers}")
 
         self.cache_handler: Optional[CacheHandler] = None
         if CacheHandler:
@@ -82,7 +91,7 @@ class ScanWorker(QRunnable):
             except ValueError as e: print(f"警告: キャッシュハンドラの初期化に失敗: {e}")
             except Exception as e: print(f"警告: キャッシュハンドラの初期化中に予期せぬエラー: {e}")
 
-        # --- 状態変数 (変更なし) ---
+        # 状態変数
         self.initial_state: Optional[ScanStateData] = initial_state
         self.all_image_paths: List[str] = []
         self.blurry_results: List[BlurResultItem] = []
@@ -92,6 +101,10 @@ class ScanWorker(QRunnable):
         self.processed_paths_blur: Set[str] = set()
         self.processed_hashes: Dict[str, str] = {}
         self.compared_pairs_similar: Set[Tuple[str, str]] = set()
+
+        # パフォーマンス改善点 2: GUI更新頻度調整用の変数
+        self._last_processing_file_emit_time: float = 0.0
+        self._processing_file_emit_interval: float = 0.2 # 秒
 
         if self.initial_state:
             self._load_state_from_data(self.initial_state)
@@ -118,13 +131,13 @@ class ScanWorker(QRunnable):
         # (変更なし)
         state_data: ScanStateData = {
             "target_directory": self.directory_path, "settings_used": self.settings,
-            "all_image_paths": self.all_image_paths, "processed_paths_blur": self.processed_paths_blur,
-            "processed_hashes": self.processed_hashes, "compared_pairs_similar": self.compared_pairs_similar,
+            "all_image_paths": self.all_image_paths, "processed_paths_blur": list(self.processed_paths_blur), # setはlistに変換
+            "processed_hashes": self.processed_hashes, "compared_pairs_similar": [list(p) for p in self.compared_pairs_similar], # set[tuple]はlist[list]に変換
             "blurry_results": self.blurry_results, "duplicate_results": self.duplicate_results,
             "similar_pair_results": self.similar_pair_results, "processing_errors": self.processing_errors
         }
         if self.cache_handler: self.cache_handler.save_all()
-        return save_scan_state(self.directory_path, state_data)
+        return save_scan_state(self.directory_path, state_data) # results_handler側でNumPy型変換
 
     def request_cancellation(self) -> None:
         # (変更なし)
@@ -147,18 +160,23 @@ class ScanWorker(QRunnable):
                 for root, dirs, files in os.walk(self.directory_path):
                     if self._cancellation_requested: return [], "処理が中断されました。"
                     processed_dirs += 1
-                    if processed_dirs % 10 == 0: self.signals.status_update.emit(f"{status_prefix} ({processed_dirs} Dirs)..."); QApplication.processEvents()
+                    if processed_dirs % 50 == 0:
+                        self.signals.status_update.emit(f"{status_prefix} ({processed_dirs} Dirs)..."); QApplication.processEvents()
                     for filename in files:
                         if filename.lower().endswith(self.file_extensions):
                             full_path: str = os.path.join(root, filename)
-                            if os.path.isfile(full_path): image_paths.append(full_path)
+                            # isfile() でファイルかどうかを確認
+                            if os.path.isfile(full_path):
+                                image_paths.append(full_path)
             else:
                 for i, filename in enumerate(os.listdir(self.directory_path)):
                     if self._cancellation_requested: return [], "処理が中断されました。"
-                    if i % 100 == 0: QApplication.processEvents()
+                    if i % 200 == 0: QApplication.processEvents()
                     if filename.lower().endswith(self.file_extensions):
                         full_path = os.path.join(self.directory_path, filename)
-                        if os.path.isfile(full_path) and not os.path.islink(full_path): image_paths.append(full_path)
+                        # isfile() と islink() でファイルでありリンクでないことを確認
+                        if os.path.isfile(full_path) and not os.path.islink(full_path):
+                            image_paths.append(full_path)
         except OSError as e: error_msg = f"ディレクトリ読み込みエラー: {e}"
         except Exception as e: error_msg = f"ファイルリスト取得エラー: {e}"
         if not self._cancellation_requested: self.signals.status_update.emit(f"ファイルリスト作成完了 ({len(image_paths)} files)")
@@ -166,10 +184,12 @@ class ScanWorker(QRunnable):
         return self.all_image_paths, error_msg
 
     def _process_blur_task(self, img_path: str, blur_detect_func: Callable[[str], BlurResult]) -> BlurTaskResult:
-        # ★ 処理開始前にファイル名シグナルを発行 ★
-        if hasattr(self.signals, 'processing_file'):
+        # パフォーマンス改善点 3: ファイル名更新頻度を調整
+        current_time = time.time()
+        if hasattr(self.signals, 'processing_file') and (current_time - self._last_processing_file_emit_time > self._processing_file_emit_interval):
              self.signals.processing_file.emit(os.path.basename(img_path))
-        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★
+             self._last_processing_file_emit_time = current_time
+
         if self._cancellation_requested: return img_path, None, "処理中断"
         score, error_msg = blur_detect_func(img_path)
         return img_path, score, error_msg
@@ -182,7 +202,7 @@ class ScanWorker(QRunnable):
         current_progress: int = 0
 
         try:
-            # --- 0. ファイルリスト取得 (変更なし) ---
+            # --- 0. ファイルリスト取得 ---
             scan_subdirs: bool = bool(self.settings.get('scan_subdirectories', False))
             image_paths: List[str]; list_error: Optional[str]
             image_paths, list_error = self._list_image_files(scan_subdirs)
@@ -219,24 +239,21 @@ class ScanWorker(QRunnable):
                         img_path, score, error_msg = future.result()
                         self.processed_paths_blur.add(img_path); processed_count_blur += 1
                         if error_msg is not None:
-                            if error_msg != "処理中断": self.processing_errors.append({'type': f'ブレ検出({blur_algo})', 'path': os.path.basename(img_path), 'error': error_msg}) # ★ basename を記録 ★
-                        elif score is not None and score <= blur_threshold: self.blurry_results.append({"path": img_path, "score": score}) # 結果にはフルパス
+                            if error_msg != "処理中断": self.processing_errors.append({'type': f'ブレ検出({blur_algo})', 'path': os.path.basename(img_path), 'error': error_msg})
+                        elif score is not None and score <= blur_threshold: self.blurry_results.append({"path": img_path, "score": score})
                         progress: int = current_progress + int((processed_count_blur / num_images) * PROGRESS_BLUR_DETECT); current_time: float = time.time()
-                        if processed_count_blur % 20 == 0: QApplication.processEvents()
+                        if processed_count_blur % 50 == 0: QApplication.processEvents()
                         if processed_count_blur % self.state_save_interval == 0: self._save_state()
-                        if processed_count_blur == num_images or current_time - last_blur_emit_time > 0.1:
+                        if processed_count_blur == num_images or current_time - last_blur_emit_time > 0.2:
                              self.signals.progress_update.emit(progress); self.signals.status_update.emit(f"{status_prefix_blur} ({processed_count_blur}/{num_images})"); last_blur_emit_time = current_time
                     except concurrent.futures.CancelledError: print("ブレ検出タスクがキャンセルされました。")
                     except Exception as exc: print(f'ブレ検出タスクで予期せぬ例外が発生: {exc}'); self.processing_errors.append({'type': f'ブレ検出({blur_algo})(致命的)', 'path': '不明', 'error': str(exc)}); processed_count_blur += 1
-            # ★ 処理完了後にファイル名表示をクリア ★
             if hasattr(self.signals, 'processing_file'): self.signals.processing_file.emit("")
             current_progress += PROGRESS_BLUR_DETECT; self.signals.progress_update.emit(current_progress)
             if not self._cancellation_requested: self._save_state()
             if self._cancellation_requested: self.signals.cancelled.emit(); return
 
             # --- 2. 重複ファイル検出 ---
-            # ★ find_duplicate_files 内部で processing_file シグナルを発行するように改造が必要 ★
-            # ★ (今回は find_duplicate_files は変更しない) ★
             self.signals.status_update.emit("重複ファイル検出中...")
             try:
                 dup_results_current, dup_errors_current = find_duplicate_files(
@@ -247,7 +264,6 @@ class ScanWorker(QRunnable):
                 )
                 if self._cancellation_requested: self.signals.cancelled.emit(); return
                 self.duplicate_results = dup_results_current
-                # ★ エラーのパスも basename にする (任意) ★
                 for err in dup_errors_current:
                     if 'path' in err: err['path'] = os.path.basename(err['path'])
                 self.processing_errors.extend(dup_errors_current)
@@ -262,8 +278,6 @@ class ScanWorker(QRunnable):
             if self._cancellation_requested: self.signals.cancelled.emit(); return
 
             # --- 3. 類似ペア検出 ---
-            # ★ find_similar_pairs 内部で processing_file シグナルを発行するように改造が必要 ★
-            # ★ (今回は find_similar_pairs は変更しない) ★
             similarity_mode: str = str(self.settings.get('similarity_mode', 'phash_orb'))
             orb_nfeatures: int = int(self.settings.get('orb_nfeatures', 1500)); orb_ratio_threshold: float = float(self.settings.get('orb_ratio_threshold', 0.70))
             min_good_matches: int = int(self.settings.get('min_good_matches', 40)); hash_threshold: int = int(self.settings.get('hash_threshold', 5))
@@ -281,9 +295,8 @@ class ScanWorker(QRunnable):
                 )
                 if self._cancellation_requested: self.signals.cancelled.emit(); return
                 self.similar_pair_results = sim_pairs_current
-                # ★ エラーのパスも basename にする (任意) ★
                 for err in comp_errors_current:
-                     if 'path' in err and ' vs ' in err['path']: # "file1 vs file2" 形式の場合
+                     if 'path' in err and ' vs ' in err['path']:
                          f1, f2 = err['path'].split(' vs ', 1)
                          err['path'] = f"{os.path.basename(f1)} vs {os.path.basename(f2)}"
                      elif 'path' in err:
@@ -298,17 +311,17 @@ class ScanWorker(QRunnable):
                 delete_scan_state(self.directory_path)
             if self._cancellation_requested: self.signals.cancelled.emit(); return
 
-            # --- 4. 結果通知 (変更なし) ---
+            # --- 4. 結果通知 ---
             end_time: float = time.time()
             print(f"スキャン処理完了。所要時間: {end_time - start_time:.2f} 秒")
             self.signals.results_ready.emit(self.blurry_results, self.similar_pair_results, self.duplicate_results, self.processing_errors)
 
         except Exception as e:
             self.signals.error.emit(f"スキャン中に予期せぬエラーが発生しました: {e}")
+            if hasattr(self.signals, 'processing_file'):
+                self.signals.processing_file.emit("")
         finally:
-            # ★ 完了/エラー/中断時に関わらず、ファイル名表示をクリア ★
             if hasattr(self.signals, 'processing_file'):
                 self.signals.processing_file.emit("")
             if not self._cancellation_requested:
                 self.signals.finished.emit()
-
