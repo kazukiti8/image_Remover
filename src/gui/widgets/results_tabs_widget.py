@@ -373,7 +373,7 @@ class ResultsTabsWidget(QTabWidget):
             item = table.item(row, 0)
             primary_path = item.data(Qt.ItemDataRole.UserRole) if item else None
         elif current_index == 1: # Similar
-            item = table.item(row, 0)
+            item = table.item(row, 5) # 修正後：5番目の列から取得
             path_data: Any = item.data(Qt.ItemDataRole.UserRole) if item else None
             if isinstance(path_data, tuple) and len(path_data) == 2:
                 primary_path, secondary_path = path_data
