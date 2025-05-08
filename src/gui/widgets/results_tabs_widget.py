@@ -105,18 +105,20 @@ class ResultsTabsWidget(QTabWidget):
     # ★★★ ヘッダーとリサイズモードを修正 ★★★
     def _create_similar_table(self) -> QTableWidget:
         """類似ペア表示用のテーブルを作成"""
-        headers = ["ファイル名1", "サイズ1", "更新日時1", "撮影日時1", "解像度1", "ファイル名2", "解像度2", "類似度(%)", "パス1"] # ★ 解像度2追加 ★
+        headers = ["サイズ1", "更新日時1", "撮影日時1", "解像度1", "", "ファイル名1", "", "ファイル名2", "解像度2", "類似度(%)", "パス1"] # チェックボックスをファイル名の横に移動
         table = self._create_table_widget(len(headers), headers, QAbstractItemView.SelectionMode.ExtendedSelection)
         # リサイズモード設定 (インデックス調整)
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)          # Filename1
-        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Size1
-        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents) # Mod Time 1
-        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # Exif Date 1
-        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents) # Resolution 1
-        table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)          # Filename2
-        table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents) # Resolution 2 ★
-        table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents) # Score
-        table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Stretch)          # Path1
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) # Size1
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Mod Time 1
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents) # Exif Date 1
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # Resolution 1
+        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents) # チェックボックス1 (ファイル名1の左)
+        table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)          # Filename1
+        table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents) # チェックボックス2 (ファイル名2の左)
+        table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)          # Filename2
+        table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents) # Resolution 2
+        table.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.ResizeToContents) # Score
+        table.horizontalHeader().setSectionResizeMode(10, QHeaderView.ResizeMode.Stretch)         # Path1
         return table
 
     # ★★★ ヘッダーとリサイズモードを修正 ★★★
@@ -207,20 +209,40 @@ class ResultsTabsWidget(QTabWidget):
         # ★ ファイル2の情報 (解像度のみ取得) ★
         _, _, dimensions2, _ = get_file_info(path2)
 
-        name1_item = QTableWidgetItem(base_name1)
-        name1_item.setData(Qt.ItemDataRole.UserRole, (path1, path2))
+        # ファイル1用の情報アイテム
         size1_item = FileSizeTableWidgetItem(file_size1)
         mod_date1_item = DateTimeTableWidgetItem(mod_time1)
         exif_date1_item = ExifDateTimeTableWidgetItem(exif_date1)
         dim1_item = ResolutionTableWidgetItem(dimensions1)
+        
+        # チェックボックス1を追加 (ファイル名1の左に配置)
+        chk1_item = QTableWidgetItem()
+        chk1_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+        chk1_item.setCheckState(Qt.CheckState.Unchecked)
+        chk1_item.setData(Qt.ItemDataRole.UserRole, path1)
+        
+        # ファイル名1
+        name1_item = QTableWidgetItem(base_name1)
+        name1_item.setData(Qt.ItemDataRole.UserRole, (path1, path2))
+        
+        # チェックボックス2を追加 (ファイル名2の左に配置)
+        chk2_item = QTableWidgetItem()
+        chk2_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+        chk2_item.setCheckState(Qt.CheckState.Unchecked)
+        chk2_item.setData(Qt.ItemDataRole.UserRole, path2)
+        
+        # ファイル名2と解像度2
         name2_item = QTableWidgetItem(base_name2)
-        # ★ 解像度2アイテムを追加 ★
         dim2_item = ResolutionTableWidgetItem(dimensions2)
+        
+        # 類似度スコアとパス
         score_item = NumericTableWidgetItem(str(score))
         score_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         path1_item = QTableWidgetItem(path1)
-        # ★ リストに dim2_item を追加 ★
-        return [name1_item, size1_item, mod_date1_item, exif_date1_item, dim1_item, name2_item, dim2_item, score_item, path1_item]
+        
+        # 新しい列順序に合わせてアイテムを返す
+        # ["サイズ1", "更新日時1", "撮影日時1", "解像度1", "", "ファイル名1", "", "ファイル名2", "解像度2", "類似度(%)", "パス1"]
+        return [size1_item, mod_date1_item, exif_date1_item, dim1_item, chk1_item, name1_item, chk2_item, name2_item, dim2_item, score_item, path1_item]
 
     def _flatten_duplicates_to_pairs(self, duplicate_results: DuplicateDict) -> List[DuplicatePair]:
         # (変更なし)
@@ -302,12 +324,32 @@ class ResultsTabsWidget(QTabWidget):
         return paths
     def get_selected_similar_primary_paths(self) -> List[str]:
         paths: List[str] = []
+        # チェックボックスで選択されたファイルを追加
+        for row in range(self.similar_table.rowCount()):
+            # チェックボックス1（ファイル1）のチェック状態を確認 - インデックス4
+            chk1_item = self.similar_table.item(row, 4)
+            if chk1_item and chk1_item.checkState() == Qt.CheckState.Checked:
+                path1: Optional[str] = chk1_item.data(Qt.ItemDataRole.UserRole)
+                if path1: 
+                    paths.append(path1)
+            
+            # チェックボックス2（ファイル2）のチェック状態を確認 - インデックス6
+            chk2_item = self.similar_table.item(row, 6)
+            if chk2_item and chk2_item.checkState() == Qt.CheckState.Checked:
+                path2: Optional[str] = chk2_item.data(Qt.ItemDataRole.UserRole)
+                if path2:
+                    paths.append(path2)
+        
+        # 元の選択ロジックも維持（行選択の場合のファイル1）
         selected_rows: Set[int] = set(item.row() for item in self.similar_table.selectedItems())
         for row in selected_rows:
-            item = self.similar_table.item(row, 0)
+            item = self.similar_table.item(row, 5)  # ファイル名1の列インデックス
             path_data: Any = item.data(Qt.ItemDataRole.UserRole) if item else None
             if isinstance(path_data, tuple) and len(path_data) == 2 and path_data[0]:
-                paths.append(path_data[0])
+                # すでにリストに含まれていなければ追加
+                if path_data[0] not in paths:
+                    paths.append(path_data[0])
+        
         return paths
     def get_selected_duplicate_paths(self) -> List[str]:
         paths: List[str] = []
@@ -355,6 +397,15 @@ class ResultsTabsWidget(QTabWidget):
     @Slot()
     def select_all_similar(self) -> None:
         self.setCurrentIndex(1)
+        
+        # 全ての類似ペアのチェックボックスをオンにする
+        for row in range(self.similar_table.rowCount()):
+            # ファイル2（右側）のチェックボックスをチェック - インデックス6
+            chk2_item = self.similar_table.item(row, 6)
+            if chk2_item and chk2_item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                chk2_item.setCheckState(Qt.CheckState.Checked)
+        
+        # 従来の行選択も行う
         self.similar_table.selectAll()
     @Slot()
     def select_all_duplicates(self) -> None:
@@ -362,10 +413,23 @@ class ResultsTabsWidget(QTabWidget):
         self.duplicate_table.selectAll()
     @Slot()
     def deselect_all(self) -> None:
+        # ブレ画像のチェックボックスをクリア
         for row in range(self.blurry_table.rowCount()):
             item = self.blurry_table.item(row, 0)
             if item and item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
                 item.setCheckState(Qt.CheckState.Unchecked)
+        
+        # 類似ペアのチェックボックスをクリア
+        for row in range(self.similar_table.rowCount()):
+            chk1_item = self.similar_table.item(row, 4)
+            if chk1_item and chk1_item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                chk1_item.setCheckState(Qt.CheckState.Unchecked)
+            
+            chk2_item = self.similar_table.item(row, 6)
+            if chk2_item and chk2_item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                chk2_item.setCheckState(Qt.CheckState.Unchecked)
+        
+        # 選択解除
         self.similar_table.clearSelection()
         self.duplicate_table.clearSelection()
         self.error_table.clearSelection()

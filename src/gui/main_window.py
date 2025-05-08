@@ -254,7 +254,7 @@ class ImageCleanerWindow(QMainWindow):
         preview_layout.addWidget(self.preview_widget)
         
         # 幅を固定にして、縦に伸ばす
-        preview_area.setFixedWidth(350)
+        preview_area.setFixedWidth(600)  # プレビュー幅を350から600に拡大
         content_layout.addWidget(preview_area)
         
         # 結果タブ
@@ -877,13 +877,32 @@ class ImageCleanerWindow(QMainWindow):
             files_to_delete = self.results_tabs_widget.get_selected_blurry_paths()
             msg = "削除対象のブレ画像がチェックされていません。"
         elif current_tab_index == 1: # 類似ペアタブ
-            selected_rows: Set[int] = set(item.row() for item in self.results_tabs_widget.similar_table.selectedItems())
-            for row in selected_rows:
-                item = self.results_tabs_widget.similar_table.item(row, 0)
-                path_data: Any = item.data(Qt.ItemDataRole.UserRole) if item else None
-                if isinstance(path_data, tuple) and len(path_data) == 2 and path_data[1]:
-                    # 存在確認は get_selected... 内で行われる
-                    files_to_delete.append(path_data[1])
+            # チェックボックスで選択されたファイルを取得
+            for row in range(self.results_tabs_widget.similar_table.rowCount()):
+                # チェックボックス1（ファイル1）のチェック状態を確認 - インデックス4
+                chk1_item = self.results_tabs_widget.similar_table.item(row, 4)
+                if chk1_item and chk1_item.checkState() == Qt.CheckState.Checked:
+                    path1: Optional[str] = chk1_item.data(Qt.ItemDataRole.UserRole)
+                    if path1:
+                        files_to_delete.append(path1)
+                
+                # チェックボックス2（ファイル2）のチェック状態を確認 - インデックス6
+                chk2_item = self.results_tabs_widget.similar_table.item(row, 6)
+                if chk2_item and chk2_item.checkState() == Qt.CheckState.Checked:
+                    path2: Optional[str] = chk2_item.data(Qt.ItemDataRole.UserRole)
+                    if path2:
+                        files_to_delete.append(path2)
+            
+            # 行選択されている場合はファイル2を追加（後方互換性のため）
+            if not files_to_delete:
+                selected_rows: Set[int] = set(item.row() for item in self.results_tabs_widget.similar_table.selectedItems())
+                for row in selected_rows:
+                    item = self.results_tabs_widget.similar_table.item(row, 5)  # ファイル名1の列インデックス
+                    path_data: Any = item.data(Qt.ItemDataRole.UserRole) if item else None
+                    if isinstance(path_data, tuple) and len(path_data) == 2 and path_data[1]:
+                        # 存在確認は get_selected... 内で行われる
+                        files_to_delete.append(path_data[1])
+            
             msg = "削除対象の類似ペアが選択されていません。"
         elif current_tab_index == 2: # 重複ペアタブ
             files_to_delete = self.results_tabs_widget.get_selected_duplicate_paths()

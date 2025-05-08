@@ -315,11 +315,12 @@ class ScanWorker(QRunnable):
                 sim_pairs_current, comp_errors_current, _ = find_similar_pairs(
                     image_paths, duplicate_paths_set=duplicate_paths_set, similarity_mode=similarity_mode,
                     orb_nfeatures=orb_nfeatures, orb_ratio_threshold=orb_ratio_threshold,
-                    min_good_matches_threshold=min_good_matches, hash_threshold=hash_threshold, # ★ hash_threshold はそのまま渡す ★
+                    min_good_matches_threshold=min_good_matches, hash_threshold=hash_threshold,
                     signals=self.signals, progress_offset=current_progress,
                     progress_range=PROGRESS_SIMILAR_DETECT,
                     is_cancelled_func=lambda: self._cancellation_requested,
-                    cache_handler=self.cache_handler
+                    cache_handler=self.cache_handler,
+                    normalize_scores=True  # スコアを1-99の範囲に正規化する
                 )
                 if self._cancellation_requested: self.signals.cancelled.emit(); return
                 self.similar_pair_results = sim_pairs_current

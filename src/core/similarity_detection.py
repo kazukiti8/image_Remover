@@ -157,7 +157,8 @@ def find_similar_pairs(image_paths: List[str],
                        progress_offset: int = 0,
                        progress_range: int = 100,
                        is_cancelled_func: Optional[Callable[[], bool]] = None,
-                       cache_handler: Optional[CacheHandler] = None) -> FindSimilarResult:
+                       cache_handler: Optional[CacheHandler] = None,
+                       normalize_scores: bool = True) -> FindSimilarResult:
     """
     指定された画像パスリスト内の画像を比較し、類似しているペアを見つけます。
     エラーハンドリングを詳細化。
@@ -240,8 +241,16 @@ def find_similar_pairs(image_paths: List[str],
 
                             distance: int = hash1 - hash2
                             if distance <= hash_threshold:
-                                if similarity_mode == 'phash_only': similar_pairs.append((path1, path2, distance))
-                                elif similarity_mode == 'phash_orb': candidate_pairs.append((path1, path2))
+                                if similarity_mode == 'phash_only': 
+                                    if normalize_scores:
+                                        # 類似度スコアを正規化: 最大距離は64、距離が小さいほど類似性が高い
+                                        # 1-99の範囲にマッピングする（1が最も異なる、99が最も似ている）
+                                        normalized_score = max(1, min(99, int(99 - (distance / hash_threshold) * 98)))
+                                        similar_pairs.append((path1, path2, normalized_score))
+                                    else:
+                                        similar_pairs.append((path1, path2, distance))
+                                elif similarity_mode == 'phash_orb': 
+                                    candidate_pairs.append((path1, path2))
                         except TypeError as e: # imagehash の差分計算で型エラーが起こる可能性
                              processing_errors.append({'type': 'pHash比較', 'path': f"{filename1} vs {filename2}", 'path1': path1, 'path2': path2, 'error': f"ハッシュ比較TypeError: {e}"})
                         except Exception as e:
@@ -279,7 +288,16 @@ def find_similar_pairs(image_paths: List[str],
                     # ★ エラーメッセージにファイル名を含める ★
                     processing_errors.append({'type': 'ORB比較', 'path': f"{filename1} vs {filename2}", 'path1': path1, 'path2': path2, 'error': error_msg})
                 elif score is not None and score >= min_good_matches_threshold:
-                    similar_pairs.append((path1, path2, score))
+                    if normalize_scores:
+                        # ORBスコアを正規化: 閾値以上のスコアを1-99の範囲にマッピング
+                        # 最小スコア = min_good_matches_threshold, 最大スコア = orb_nfeatures
+                        # 高いスコアほど類似度が高い (99が最も似ている、1が最も異なる)
+                        max_score = orb_nfeatures
+                        normalized_score = max(1, min(99, 1 + int((score - min_good_matches_threshold) / 
+                                            (max_score - min_good_matches_threshold) * 98)))
+                        similar_pairs.append((path1, path2, normalized_score))
+                    else:
+                        similar_pairs.append((path1, path2, score))
                 emit_progress(orb_comparisons, total_orb_comparisons, int(orb_comp_offset), int(orb_comp_range), status_prefix_orb_comp)
         emit_progress(total_orb_comparisons, total_orb_comparisons, int(orb_comp_offset), int(orb_comp_range), status_prefix_orb_comp)
         print(f"ORB比較完了。")
