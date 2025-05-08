@@ -119,19 +119,6 @@ class ImageCleanerWindow(QMainWindow):
         top_layout.setContentsMargins(15, 15, 15, 15)
         top_layout.setSpacing(12)
         
-        # ヘッダー
-        header_label = QLabel("画像クリーナー")
-        header_label.setStyleSheet("font-size: 18pt; font-weight: bold;")
-        header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        top_layout.addWidget(header_label)
-        
-        # 説明テキスト
-        description = QLabel("ブレた画像や類似・重複画像を検出して整理できます")
-        description.setStyleSheet("font-size: 10pt; color: #666;")
-        description.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        top_layout.addWidget(description)
-        top_layout.addSpacing(5)
-        
         # フォルダ選択行
         folder_frame = QFrame()
         folder_frame.setFrameShape(QFrame.Shape.StyledPanel)
@@ -217,11 +204,6 @@ class ImageCleanerWindow(QMainWindow):
         self.status_label.setWordWrap(True)
         status_layout.addWidget(self.status_label)
         
-        self.current_file_label = QLabel(" ")
-        self.current_file_label.setStyleSheet("color: grey; font-size: 9pt;")
-        self.current_file_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        status_layout.addWidget(self.current_file_label)
-        
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         self.progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -236,18 +218,6 @@ class ImageCleanerWindow(QMainWindow):
         central_layout = QVBoxLayout(central_area)
         central_layout.setContentsMargins(15, 15, 15, 15)
         central_layout.setSpacing(12)
-        
-        # セクションタイトル
-        results_title = QLabel("検出結果")
-        results_title.setStyleSheet("font-size: 14pt; font-weight: bold;")
-        results_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        central_layout.addWidget(results_title)
-        
-        # 説明
-        results_desc = QLabel("ブレた画像や類似・重複画像が検出されると、ここに表示されます")
-        results_desc.setStyleSheet("font-size: 10pt; color: #666;")
-        results_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        central_layout.addWidget(results_desc)
         
         # 操作ボタン
         action_frame = QFrame()
@@ -306,11 +276,6 @@ class ImageCleanerWindow(QMainWindow):
         results_frame.setFrameShape(QFrame.Shape.StyledPanel)
         results_layout = QVBoxLayout(results_frame)
         results_layout.setContentsMargins(8, 8, 8, 8)
-        
-        results_tab_title = QLabel("検出項目")
-        results_tab_title.setStyleSheet("font-weight: bold;")
-        results_tab_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        results_layout.addWidget(results_tab_title)
         
         self.results_tabs_widget = ResultsTabsWidget(self)
         results_layout.addWidget(self.results_tabs_widget)
