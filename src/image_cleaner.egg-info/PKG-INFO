@@ -1,0 +1,180 @@
+Metadata-Version: 2.4
+Name: image_cleaner
+Version: 0.1.0
+Summary: 指定されたフォルダ内のブレ画像や類似画像を検出し、整理するためのGUIアプリケーション。
+Author-email: Your Name <you@example.com>
+License: MIT License
+Project-URL: Homepage, https://github.com/your_username/image_remover
+Keywords: image,cleaner,duplicate,similar,blur,gui,pyside
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Environment :: Win32 (MS Windows)
+Classifier: Intended Audience :: End Users/Desktop
+Classifier: Topic :: Multimedia :: Graphics :: Viewers
+Classifier: Topic :: Utilities
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: PySide6~=6.9.0
+Requires-Dist: PySide6-Addons~=6.9.0
+Requires-Dist: PySide6-Essentials~=6.9.0
+Requires-Dist: opencv-python~=4.11.0
+Requires-Dist: Pillow~=11.2.1
+Requires-Dist: pillow-heif>=0.15
+Requires-Dist: imagehash~=4.3.1
+Requires-Dist: Send2Trash~=1.8.3
+Requires-Dist: numpy<2.3,>=1.20
+Requires-Dist: scipy~=1.15.2
+Requires-Dist: PyWavelets~=1.8.0
+Requires-Dist: packaging
+Requires-Dist: pywin32-ctypes~=0.2.3; sys_platform == "win32"
+Provides-Extra: build
+Requires-Dist: pyinstaller~=6.13.0; extra == "build"
+Requires-Dist: pyinstaller-hooks-contrib~=2025.4; extra == "build"
+Requires-Dist: pefile~=2023.2.7; sys_platform == "win32" and extra == "build"
+Requires-Dist: altgraph~=0.17.4; extra == "build"
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: flake8; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
+
+# 画像クリーナー (Image Cleaner)
+
+## 概要
+
+このアプリケーションは、指定されたフォルダ内にある「ブレている画像」と「類似している画像ペア」を検出し、ユーザーが確認した上で不要な画像をゴミ箱に移動するためのツールです。
+
+## 機能
+
+* **ブレ画像検出:** FFT（高速フーリエ変換）または Laplacian Variance を用いて画像のシャープネスを評価し、設定された閾値以下の画像を検出します。
+* **類似ペア検出:** pHash+ORB、pHashのみ、ORBのみのモードを選択でき、画像間の類似度を計算し、設定された閾値に基づいて類似ペアを検出します。
+* **完全一致検出:** MD5ハッシュを用いて完全に同一内容のファイルを検出し、重複ファイルとして表示します。
+* **プレビュー:** 検出された画像を左右に並べて表示し、比較・確認できます。ズーム・パン機能、差分表示機能（同サイズのみ）があります。
+* **削除:** 選択した画像（ブレ画像、類似ペアの主画像、重複ファイル）をシステムのゴミ箱に安全に移動します。
+* **キーボード/マウス操作:** プレビュー画像に対して、キーボードショートカット（Q/Wで削除、A/Sで開く）やマウスクリック（削除）での操作が可能です。
+* **設定:** 検出アルゴリズム、感度（閾値）、ORBパラメータなどを調整できます。設定は自動的に保存・読み込みされます。
+* **中断と再開:** スキャン処理を中断し、後で途中から再開できます（一部機能）。
+* **キャッシュ:** MD5ハッシュとpHashの計算結果をキャッシュし、再スキャンを高速化します。
+
+## 動作環境
+
+* Windows OS (Linux, macOS でも動作する可能性がありますが、`send2trash` やファイル操作の一部が異なる場合があります)
+* Python 3.8以上推奨
+
+## セットアップ
+
+1.  **リポジトリのクローンまたはダウンロード:**
+    ```bash
+    git clone <リポジトリURL> # ★ あなたのリポジトリURLに変更 ★
+    cd image_remover
+    ```
+    または、ZIPファイルをダウンロードして展開します。
+
+2.  **仮想環境の作成と有効化 (推奨):**
+    ```bash
+    python -m venv venv
+    # Windows
+    .\venv\Scripts\activate
+    # Linux/macOS
+    # source venv/bin/activate
+    ```
+
+3.  **必要なライブラリのインストール:**
+    プロジェクトのルートディレクトリ（`pyproject.toml` がある場所）で以下のコマンドを実行します。
+    ```bash
+    # 通常のインストール
+    pip install .
+    # または、開発用に編集可能モードでインストールする場合
+    # pip install -e .
+    ```
+    これにより、`pyproject.toml` に記載された依存関係がインストールされます。
+
+## 使い方
+
+1.  **起動:** プロジェクトのルートディレクトリで、仮想環境を有効化した後、以下のコマンドを実行します。
+    ```bash
+    python main.py
+    ```
+    （もし `[project.gui-scripts]` を設定し、`pip install .` でインストールした場合、コマンドプロンプトで `image-cleaner` と入力して起動できる可能性もあります。）
+2.  **フォルダ選択:** 「フォルダを選択...」ボタンをクリックし、スキャンしたい画像が含まれるフォルダを選択します。中断されたスキャンがある場合は、再開するか確認されます。
+3.  **設定 (任意):** 「設定...」ボタンをクリックし、検出アルゴリズムや閾値などを調整します。デフォルト値でも動作します。
+4.  **スキャン開始:** 「スキャン開始」ボタンをクリックします。処理中はプログレスバーとステータスが表示されます。「中止」ボタンで中断できます（状態は保存されます）。
+5.  **結果確認:**
+    * スキャンが完了すると、「ブレ画像」「類似ペア」「重複ファイル」タブに結果が表示されます。
+    * テーブルのヘッダーをクリックすると、各列でソートできます（撮影日時でもソート可能）。
+    * テーブルの行を選択すると、上部のプレビューエリアに画像が表示されます。
+    * 類似ペア選択時、サイズが同じであればプレビュー下の「差分表示」チェックボックスで差分を確認できます。プレビュー画像はマウスホイールでズーム、ドラッグでパンできます。
+6.  **削除:**
+    * **ブレ画像/重複ファイル:** 削除したい画像の行頭にあるチェックボックスをオンにします。
+    * **類似ペア:** 削除したい主画像が表示されている行を選択します（複数選択可）。
+    * 「選択した項目をゴミ箱へ移動」ボタンをクリックします。確認ダイアログが表示されるので、「Yes」を選択するとゴミ箱に移動されます。
+    * **プレビューからの削除:** プレビュー画像が表示されている状態で、`Q`キーまたは左画像クリックで左画像を、`W`キーまたは右画像クリックで右画像を（確認ダイアログの後）ゴミ箱に移動できます。
+    * **コンテキストメニュー:** 類似ペア/重複ファイルタブの項目を右クリックすると、個別の削除や「これ以外を削除」などの操作が可能です。
+7.  **ファイルを開く:**
+    * プレビュー画像が表示されている状態で、`A`キーで左画像を、`S`キーで右画像を、関連付けられたアプリケーションで開くことができます。コンテキストメニューからも開けます。
+8.  **全選択/解除:** 下部のアクションボタンで、各タブの項目を一括で選択・解除できます。
+
+## 設定項目
+
+「設定...」ボタンから以下の項目を調整できます。
+
+* **スキャン設定:**
+    * サブディレクトリもスキャンする
+* **ブレ検出:**
+    * 検出アルゴリズム (FFT / Laplacian)
+    * 各アルゴリズムの閾値 (低いほどブレと判定)
+* **類似ペア検出:**
+    * 検出モード (pHash+ORB / pHashのみ / ORBのみ)
+    * pHash ハミング距離閾値 (pHash利用時)
+    * ORB 特徴点数 (ORB利用時)
+    * ORB Ratio Test 閾値 (ORB利用時)
+    * ORB 最小マッチ数 (ORB利用時)
+
+設定はアプリケーション終了時に自動的にホームディレクトリの `.image_cleaner_settings.json` に保存され、次回起動時に読み込まれます。
+
+## キャッシュと状態ファイル
+
+* スキャン対象フォルダ内に `.image_cleaner_cache` という隠しフォルダが作成され、MD5ハッシュとpHashの計算結果がキャッシュされます。これにより再スキャンが高速化されます。
+* スキャンが中断されると、同じく対象フォルダ内に `.image_cleaner_scan_state.json` という隠しファイルが作成され、処理の進捗状況が保存されます。次回同じフォルダを選択すると、このファイルに基づいて再開できます。
+* スキャンが正常に完了すると、状態ファイルは自動的に削除されます。キャッシュファイルは残ります。
+
+## 使用ライブラリとライセンス
+
+このアプリケーションは以下の主要なライブラリを使用しています。配布や改変を行う場合は、各ライブラリのライセンス条項に従ってください。
+
+* **PySide6:** LGPL v3
+* **OpenCV (opencv-python):** Apache 2 License
+* **NumPy:** BSD 3-Clause License
+* **SciPy:** BSD 3-Clause License
+* **Pillow:** HPND License
+* **pillow-heif:** Apache 2 / GNU GPL (使用するHEIFライブラリに依存)
+* **ImageHash:** BSD 2-Clause License
+* **Send2Trash:** BSD 3-Clause License
+* **PyWavelets:** MIT License
+* **packaging:** Apache 2 / BSD
+
+*注意: これはライセンスに関する簡易的な情報です。正確な情報は各ライブラリの公式ドキュメントやライセンスファイルをご確認ください。*
+
+## 実行可能ファイル (.exe) の作成 (任意)
+
+PyInstaller を使用して `.exe` ファイルを作成できます。
+
+1.  仮想環境を有効化します。
+2.  開発用依存関係をインストールします (まだの場合)。
+    ```bash
+    pip install .[build]
+    ```
+3.  プロジェクトルートディレクトリでコマンドを実行します。
+    * **フォルダ形式:**
+        ```bash
+        pyinstaller main.py --noconsole --name ImageCleaner
+        ```
+        (`dist/ImageCleaner` フォルダが生成されます)
+    * **単一ファイル形式 (起動が遅くなる可能性あり):**
+        ```bash
+        pyinstaller main.py --noconsole --name ImageCleaner --onefile
+        ```
+        (`dist` フォルダ内に `ImageCleaner.exe` が生成されます)
+
+*注意: PySide6 や OpenCV を含むアプリケーションの `.exe` 化は、依存関係の問題で失敗することがあります。`pyproject.toml` の `build` 依存関係に必要なものが含まれているか確認してください。問題が解決しない場合は、PyInstaller の `--hidden-import` オプションや `.spec` ファイルの編集が必要になる場合があります。*
+

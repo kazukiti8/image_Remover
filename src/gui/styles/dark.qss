@@ -1,0 +1,364 @@
+/* gui/styles/dark.qss - モダンなダークテーマ */
+
+QWidget {
+    background-color: #1e1e1e; /* ベース背景色 */
+    color: #e8e8e8; /* 基本テキスト色 */
+    font-family: "Yu Gothic UI", "Meiryo UI", "Segoe UI", sans-serif; /* フォント */
+}
+
+QMainWindow {
+    background-color: #1a1a1a; /* メインウィンドウ背景 */
+}
+
+QFrame {
+    border-radius: 6px; /* フレームの角を丸くする */
+    background-color: #262626;
+    border: 1px solid #3d3d3d;
+}
+
+QGroupBox {
+    background-color: #2a2a2a;
+    border: 1px solid #3d3d3d;
+    border-radius: 6px;
+    margin-top: 1ex;
+    font-weight: bold;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 5px;
+    background-color: #1e1e1e;
+    left: 10px;
+}
+
+QLabel {
+    background-color: transparent;
+    color: #e8e8e8;
+}
+
+QLineEdit, QTextEdit, QSpinBox, QDoubleSpinBox {
+    background-color: #2d2d2d;
+    border: 1px solid #3d3d3d;
+    border-radius: 4px;
+    padding: 6px 8px;
+    color: #e8e8e8;
+    selection-background-color: #3498db;
+    selection-color: #ffffff;
+}
+
+QLineEdit:read-only {
+    background-color: #2a2a2a;
+    color: #9e9e9e;
+}
+
+QPushButton {
+    background-color: #353535;
+    color: #e8e8e8;
+    border: 1px solid #3d3d3d;
+    border-radius: 4px;
+    padding: 6px 16px;
+    min-width: 80px;
+    font-weight: normal;
+}
+
+QPushButton:hover {
+    background-color: #454545;
+    border-color: #555555;
+}
+
+QPushButton:pressed {
+    background-color: #555555;
+    border-color: #666666;
+}
+
+QPushButton:disabled {
+    background-color: #2a2a2a;
+    border-color: #323232;
+    color: #6e6e6e;
+}
+
+/* スキャンボタンをハイライト */
+QPushButton#scan_button {
+    background-color: #2980b9;
+    color: white;
+    font-weight: bold;
+    border: none;
+}
+
+QPushButton#scan_button:hover {
+    background-color: #3498db;
+}
+
+QPushButton#scan_button:pressed {
+    background-color: #1f6aa5;
+}
+
+QPushButton#scan_button:disabled {
+    background-color: #264a63;
+    color: #7a7a7a;
+}
+
+/* キャンセルボタンを目立たせる */
+QPushButton#cancel_button {
+    background-color: #c0392b;
+    color: white;
+    font-weight: bold;
+    border: none;
+}
+
+QPushButton#cancel_button:hover {
+    background-color: #e74c3c;
+}
+
+QPushButton#cancel_button:pressed {
+    background-color: #a93226;
+}
+
+/* 削除ボタンを警告色に */
+QPushButton#delete_button {
+    background-color: #d35400;
+    color: white;
+    font-weight: bold;
+    border: none;
+}
+
+QPushButton#delete_button:hover {
+    background-color: #e67e22;
+}
+
+QPushButton#delete_button:pressed {
+    background-color: #ba4a00;
+}
+
+QPushButton#delete_button:disabled {
+    background-color: #693b1a;
+    color: #9e9e9e;
+}
+
+QCheckBox, QRadioButton {
+    background-color: transparent;
+    color: #e8e8e8;
+    spacing: 8px;
+}
+
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #555555;
+    border-radius: 3px;
+    background-color: #2d2d2d;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #3498db;
+    border-color: #2980b9;
+}
+
+QRadioButton::indicator {
+    border-radius: 8px;
+}
+
+QRadioButton::indicator:checked {
+    background-color: #3498db;
+    border-color: #2980b9;
+    border-radius: 8px;
+    width: 10px;
+    height: 10px;
+}
+
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {
+    border-color: #424242;
+    background-color: #2a2a2a;
+}
+
+QComboBox {
+    background-color: #2d2d2d;
+    border: 1px solid #3d3d3d;
+    border-radius: 4px;
+    padding: 6px 12px;
+    min-width: 6em;
+    color: #e8e8e8;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 20px;
+    border-left: none;
+    border-top-right-radius: 4px;
+    border-bottom-right-radius: 4px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #2d2d2d;
+    border: 1px solid #3d3d3d;
+    selection-background-color: #3498db;
+    selection-color: #ffffff;
+    color: #e8e8e8;
+    outline: 0px;
+}
+
+QProgressBar {
+    border: none;
+    border-radius: 4px;
+    text-align: center;
+    background-color: #2a2a2a;
+    color: #e8e8e8;
+    height: 10px;
+}
+
+QProgressBar::chunk {
+    background-color: #3498db;
+    border-radius: 4px;
+}
+
+QTabWidget::pane {
+    border: 1px solid #3d3d3d;
+    border-radius: 6px;
+    border-top-left-radius: 0px;
+    background-color: #262626;
+    padding: 5px;
+}
+
+QTabBar::tab {
+    background-color: #2a2a2a;
+    border: 1px solid #3d3d3d;
+    border-bottom: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 8px 16px;
+    margin-right: 2px;
+    color: #9e9e9e;
+}
+
+QTabBar::tab:selected {
+    background-color: #262626;
+    color: #e8e8e8;
+    font-weight: bold;
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: #353535;
+}
+
+QTableWidget {
+    background-color: #262626;
+    alternate-background-color: #2a2a2a;
+    border: 1px solid #3d3d3d;
+    gridline-color: #3d3d3d;
+    color: #e8e8e8;
+    selection-background-color: #3498db;
+    selection-color: #ffffff;
+    border-radius: 4px;
+}
+
+QHeaderView::section {
+    background-color: #2d2d2d;
+    color: #e8e8e8;
+    border: 1px solid #3d3d3d;
+    padding: 6px;
+    font-weight: bold;
+}
+
+QGraphicsView {
+    border: 1px solid #3d3d3d;
+    background-color: #262626;
+    border-radius: 4px;
+}
+
+QGraphicsView QLabel {
+    color: #9e9e9e;
+}
+
+/* メニューバー */
+QMenuBar {
+    background-color: #1a1a1a;
+    border-bottom: 1px solid #3d3d3d;
+    color: #e8e8e8;
+}
+
+QMenuBar::item {
+    background: transparent;
+    padding: 6px 10px;
+}
+
+QMenuBar::item:selected {
+    background: #353535;
+    border-radius: 4px;
+}
+
+/* メニュー */
+QMenu {
+    background-color: #2d2d2d;
+    border: 1px solid #3d3d3d;
+    border-radius: 4px;
+    padding: 5px 0px;
+    color: #e8e8e8;
+}
+
+QMenu::item {
+    padding: 6px 25px;
+}
+
+QMenu::item:selected {
+    background-color: #3498db;
+    color: #ffffff;
+}
+
+QMenu::separator {
+    height: 1px;
+    background: #3d3d3d;
+    margin: 5px 10px;
+}
+
+/* スクロールバー */
+QScrollBar:vertical {
+    border: none;
+    background: #2a2a2a;
+    width: 10px;
+    margin: 0px;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:vertical {
+    background: #4a4a4a;
+    min-height: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+    height: 0px;
+}
+
+QScrollBar:horizontal {
+    border: none;
+    background: #2a2a2a;
+    height: 10px;
+    margin: 0px;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:horizontal {
+    background: #4a4a4a;
+    min-width: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal,
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: none;
+    width: 0px;
+}
+
+/* ツールチップ */
+QToolTip {
+    background-color: #353535;
+    color: #e8e8e8;
+    border: 1px solid #3d3d3d;
+    padding: 4px;
+    border-radius: 4px;
+}
+

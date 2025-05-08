@@ -120,26 +120,66 @@ class PreviewWidget(QWidget):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        main_layout = QVBoxLayout(self); main_layout.setContentsMargins(0, 0, 0, 0); main_layout.setSpacing(5)
-        preview_layout = QHBoxLayout(); preview_layout.setContentsMargins(0, 0, 0, 0); preview_layout.setSpacing(10)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(8)
+        
+        # プレビュータイトル（よりわかりやすく）
+        title_layout = QHBoxLayout()
+        left_title = QLabel("元の画像")
+        left_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left_title.setStyleSheet("font-weight: bold;")
+        right_title = QLabel("比較画像")
+        right_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_title.setStyleSheet("font-weight: bold;")
+        title_layout.addWidget(left_title)
+        title_layout.addWidget(right_title)
+        main_layout.addLayout(title_layout)
+        
+        # プレビュー領域
+        preview_layout = QHBoxLayout()
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(10)
+        
+        # 左プレビュー
         self.left_preview_view = ZoomPanGraphicsView(self)
-        self.left_preview_view.initial_label.setText("左プレビュー\n(画像選択で表示)")
-        # ★★★ ツールチップ修正 ★★★
-        self.left_preview_view.setToolTip("左クリックで削除 / Aキーで開く\nホイールでズーム、右ドラッグでパン")
-        # ★★★★★★★★★★★★★★★★
+        self.left_preview_view.initial_label.setText("画像を選択すると\nここに表示されます")
+        self.left_preview_view.setToolTip("左クリック → 削除\nAキー → 開く\nホイール → ズーム\n右ドラッグ → 移動")
         self.left_preview_view.clicked.connect(self._on_left_preview_clicked)
+        
+        # 右プレビュー
         self.right_preview_view = ZoomPanGraphicsView(self)
-        self.right_preview_view.initial_label.setText("右プレビュー\n(類似ペア選択で表示)")
-        # ★★★ ツールチップ修正 ★★★
-        self.right_preview_view.setToolTip("左クリックで削除 / Sキーで開く\nホイールでズーム、右ドラッグでパン")
-        # ★★★★★★★★★★★★★★★★
+        self.right_preview_view.initial_label.setText("類似/重複ペア選択で\nここに表示されます")
+        self.right_preview_view.setToolTip("左クリック → 削除\nSキー → 開く\nホイール → ズーム\n右ドラッグ → 移動")
         self.right_preview_view.clicked.connect(self._on_right_preview_clicked)
-        preview_layout.addWidget(self.left_preview_view, 1); preview_layout.addWidget(self.right_preview_view, 1)
+        
+        # ボーダーと背景色を追加
+        for view in [self.left_preview_view, self.right_preview_view]:
+            view.setFrameShape(QFrame.Shape.StyledPanel)
+            view.setFrameShadow(QFrame.Shadow.Sunken)
+        
+        preview_layout.addWidget(self.left_preview_view, 1)
+        preview_layout.addWidget(self.right_preview_view, 1)
         main_layout.addLayout(preview_layout, 1)
-        self.diff_checkbox = QCheckBox("差分表示 (右側に表示、同サイズのみ)")
-        self.diff_checkbox.setToolTip("..."); self.diff_checkbox.setEnabled(False)
+        
+        # 操作ガイド
+        guide_layout = QHBoxLayout()
+        left_guide = QLabel("Aキー: 開く | クリック: 削除")
+        left_guide.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left_guide.setStyleSheet("font-size: 9pt; color: #666;")
+        right_guide = QLabel("Sキー: 開く | クリック: 削除")
+        right_guide.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_guide.setStyleSheet("font-size: 9pt; color: #666;")
+        guide_layout.addWidget(left_guide)
+        guide_layout.addWidget(right_guide)
+        main_layout.addLayout(guide_layout)
+        
+        # 差分表示チェックボックス
+        self.diff_checkbox = QCheckBox("差分表示（同サイズの画像のみ）")
+        self.diff_checkbox.setToolTip("同じサイズの画像間の違いを視覚的に表示します")
+        self.diff_checkbox.setEnabled(False)
         self.diff_checkbox.toggled.connect(self._toggle_diff_view)
-        main_layout.addWidget(self.diff_checkbox)
+        main_layout.addWidget(self.diff_checkbox, 0, Qt.AlignmentFlag.AlignCenter)
 
     # ... (他のメソッドは変更なし) ...
     def _load_image_and_get_size(self, image_path: str, mode: str = 'rgb') -> LoadResult:

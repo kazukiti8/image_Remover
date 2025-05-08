@@ -60,7 +60,7 @@ class ImageCleanerWindow(QMainWindow):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setWindowTitle("画像クリーナー")
-        self.setGeometry(100, 100, 1000, 750)
+        self.setGeometry(100, 100, 1200, 800)
         self.threadpool: QThreadPool = QThreadPool()
         self.current_settings: SettingsDict = load_settings()
         # UI要素の型ヒント
@@ -110,81 +110,215 @@ class ImageCleanerWindow(QMainWindow):
         self.setCentralWidget(main_widget)
         main_layout = QVBoxLayout(main_widget)
         main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
 
-        # --- フォルダ選択、設定、スキャン実行エリア ---
-        input_layout = QHBoxLayout()
+        # --- 上部エリア: フォルダ選択とスキャンボタン ---
+        top_area = QFrame()
+        top_area.setFrameShape(QFrame.Shape.StyledPanel)
+        top_layout = QVBoxLayout(top_area)
+        top_layout.setContentsMargins(15, 15, 15, 15)
+        top_layout.setSpacing(12)
+        
+        # ヘッダー
+        header_label = QLabel("画像クリーナー")
+        header_label.setStyleSheet("font-size: 18pt; font-weight: bold;")
+        header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top_layout.addWidget(header_label)
+        
+        # 説明テキスト
+        description = QLabel("ブレた画像や類似・重複画像を検出して整理できます")
+        description.setStyleSheet("font-size: 10pt; color: #666;")
+        description.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top_layout.addWidget(description)
+        top_layout.addSpacing(5)
+        
+        # フォルダ選択行
+        folder_frame = QFrame()
+        folder_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        folder_layout = QHBoxLayout(folder_frame)
+        folder_layout.setContentsMargins(10, 10, 10, 10)
+        
         self.dir_label = QLabel("対象フォルダ:")
         self.dir_path_edit = QLineEdit()
         self.dir_path_edit.setReadOnly(True)
-        self.select_dir_button = QPushButton("フォルダを選択...")
-        input_layout.addWidget(self.dir_label)
-        input_layout.addWidget(self.dir_path_edit, 1)
-        input_layout.addWidget(self.select_dir_button)
-        main_layout.addLayout(input_layout)
-        main_layout.addSpacing(5)
-
-        config_layout = QHBoxLayout()
-        self.settings_button = QPushButton("設定...")
-        self.save_results_button = QPushButton("結果を保存...")
-        self.load_results_button = QPushButton("結果を読み込み...")
-        config_layout.addWidget(self.settings_button)
-        config_layout.addWidget(self.save_results_button)
-        config_layout.addWidget(self.load_results_button)
-        config_layout.addStretch()
-        main_layout.addLayout(config_layout)
-        main_layout.addSpacing(10)
-
-        proc_layout = QHBoxLayout()
+        self.dir_path_edit.setMinimumHeight(30)
+        self.select_dir_button = QPushButton("フォルダ選択")
+        self.select_dir_button.setMinimumHeight(30)
+        
+        folder_layout.addWidget(self.dir_label)
+        folder_layout.addWidget(self.dir_path_edit, 1)
+        folder_layout.addWidget(self.select_dir_button)
+        top_layout.addWidget(folder_frame)
+        
+        # スキャンボタンと設定ボタン
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
+        
+        # メインアクションボタン
+        action_frame = QFrame()
+        action_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        action_layout = QHBoxLayout(action_frame)
+        action_layout.setContentsMargins(10, 10, 10, 10)
+        
         self.scan_button = QPushButton("スキャン開始")
+        self.scan_button.setObjectName("scan_button")
+        self.scan_button.setMinimumHeight(40)
+        self.scan_button.setMinimumWidth(150)
+        self.scan_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_MediaPlay))
+        
         self.cancel_button = QPushButton("中止")
+        self.cancel_button.setObjectName("cancel_button")
+        self.cancel_button.setMinimumHeight(40)
+        self.cancel_button.setMinimumWidth(150)
+        self.cancel_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_MediaStop))
         self.cancel_button.setVisible(False)
-        self.status_label = QLabel("ステータス: 待機中")
+        
+        action_layout.addWidget(self.scan_button)
+        action_layout.addWidget(self.cancel_button)
+        button_layout.addWidget(action_frame)
+        
+        # ユーティリティボタン
+        util_frame = QFrame()
+        util_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        util_layout = QHBoxLayout(util_frame)
+        util_layout.setContentsMargins(10, 10, 10, 10)
+        
+        self.settings_button = QPushButton("設定")
+        self.settings_button.setMinimumHeight(40)
+        self.settings_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_FileDialogDetailedView))
+        
+        self.save_results_button = QPushButton("結果保存")
+        self.save_results_button.setMinimumHeight(40)
+        self.save_results_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DialogSaveButton))
+        
+        self.load_results_button = QPushButton("結果読込")
+        self.load_results_button.setMinimumHeight(40)
+        self.load_results_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DialogOpenButton))
+        
+        util_layout.addWidget(self.settings_button)
+        util_layout.addWidget(self.save_results_button)
+        util_layout.addWidget(self.load_results_button)
+        
+        button_layout.addWidget(util_frame, 1)  # 右側を広く
+        top_layout.addLayout(button_layout)
+        
+        # ステータス表示エリア
+        status_frame = QFrame()
+        status_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        status_layout = QVBoxLayout(status_frame)
+        status_layout.setContentsMargins(10, 10, 10, 10)
+        status_layout.setSpacing(5)
+        
+        status_title = QLabel("処理状況")
+        status_title.setStyleSheet("font-weight: bold;")
+        status_layout.addWidget(status_title)
+        
+        self.status_label = QLabel("フォルダを選択してください")
         self.status_label.setWordWrap(True)
-        proc_layout.addWidget(self.scan_button)
-        proc_layout.addWidget(self.cancel_button)
-        proc_layout.addWidget(self.status_label, 1)
-        main_layout.addLayout(proc_layout)
-
+        status_layout.addWidget(self.status_label)
+        
         self.current_file_label = QLabel(" ")
-        self.current_file_label.setStyleSheet("QLabel { color: grey; font-size: 9pt; }")
+        self.current_file_label.setStyleSheet("color: grey; font-size: 9pt;")
         self.current_file_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        main_layout.addWidget(self.current_file_label)
-
+        status_layout.addWidget(self.current_file_label)
+        
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         self.progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(self.progress_bar)
-        main_layout.addSpacing(10)
+        status_layout.addWidget(self.progress_bar)
+        
+        top_layout.addWidget(status_frame)
+        main_layout.addWidget(top_area)
 
-        # --- プレビュー、結果タブ ---
-        self.preview_widget = PreviewWidget(self)
-        preview_frame = QFrame()
-        preview_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        preview_frame_layout = QVBoxLayout(preview_frame)
-        preview_frame_layout.setContentsMargins(0,0,0,0)
-        preview_frame_layout.addWidget(self.preview_widget)
-        preview_frame.setFixedHeight(250)
-        main_layout.addWidget(preview_frame, stretch=0)
-        main_layout.addSpacing(10)
-
-        self.results_tabs_widget = ResultsTabsWidget(self)
-        main_layout.addWidget(self.results_tabs_widget, stretch=1)
-        main_layout.addSpacing(10)
-
-        # --- アクションボタンエリア ---
-        action_layout = QHBoxLayout()
-        self.delete_button = QPushButton("選択した項目をゴミ箱へ移動")
-        self.delete_button.setToolTip("現在表示中のタブで選択/チェックされた項目を削除します。\n(ブレ:チェックされたもの, 類似/重複ペア:選択された行のファイル2)")
-        self.select_all_blurry_button = QPushButton("全選択(ブレ)")
-        self.select_all_duplicates_button = QPushButton("全選択(重複ペア)") # 名前変更済み
-        self.deselect_all_button = QPushButton("全選択解除")
-
+        # --- 中央エリア: 結果とプレビュー ---
+        central_area = QFrame()
+        central_area.setFrameShape(QFrame.Shape.StyledPanel)
+        central_layout = QVBoxLayout(central_area)
+        central_layout.setContentsMargins(15, 15, 15, 15)
+        central_layout.setSpacing(12)
+        
+        # セクションタイトル
+        results_title = QLabel("検出結果")
+        results_title.setStyleSheet("font-size: 14pt; font-weight: bold;")
+        results_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        central_layout.addWidget(results_title)
+        
+        # 説明
+        results_desc = QLabel("ブレた画像や類似・重複画像が検出されると、ここに表示されます")
+        results_desc.setStyleSheet("font-size: 10pt; color: #666;")
+        results_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        central_layout.addWidget(results_desc)
+        
+        # 操作ボタン
+        action_frame = QFrame()
+        action_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        action_layout = QHBoxLayout(action_frame)
+        action_layout.setContentsMargins(10, 10, 10, 10)
+        
+        self.delete_button = QPushButton("選択項目を削除")
+        self.delete_button.setObjectName("delete_button")
+        self.delete_button.setToolTip("現在表示中のタブで選択されている項目をゴミ箱に移動します")
+        self.delete_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_TrashIcon))
+        self.delete_button.setMinimumHeight(36)
+        
+        # 選択ボタンはアイコンつきに
+        self.select_all_blurry_button = QPushButton("ブレ画像選択")
+        self.select_all_blurry_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DialogApplyButton))
+        
+        self.select_all_duplicates_button = QPushButton("重複選択")
+        self.select_all_duplicates_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DialogApplyButton))
+        
+        self.deselect_all_button = QPushButton("選択解除")
+        self.deselect_all_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DialogCancelButton))
+        
         action_layout.addWidget(self.delete_button)
         action_layout.addStretch()
         action_layout.addWidget(self.select_all_blurry_button)
         action_layout.addWidget(self.select_all_duplicates_button)
         action_layout.addWidget(self.deselect_all_button)
-        main_layout.addLayout(action_layout)
+        
+        central_layout.addWidget(action_frame)
+        
+        # プレビューと結果を水平に並べるレイアウト
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(15)
+        
+        # プレビュー
+        preview_area = QFrame()
+        preview_area.setFrameShape(QFrame.Shape.StyledPanel)
+        preview_layout = QVBoxLayout(preview_area)
+        preview_layout.setContentsMargins(8, 8, 8, 8)
+        
+        preview_title = QLabel("プレビュー")
+        preview_title.setStyleSheet("font-weight: bold;")
+        preview_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview_layout.addWidget(preview_title)
+        
+        self.preview_widget = PreviewWidget(self)
+        preview_layout.addWidget(self.preview_widget)
+        
+        # 幅を固定にして、縦に伸ばす
+        preview_area.setFixedWidth(350)
+        content_layout.addWidget(preview_area)
+        
+        # 結果タブ
+        results_frame = QFrame()
+        results_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        results_layout = QVBoxLayout(results_frame)
+        results_layout.setContentsMargins(8, 8, 8, 8)
+        
+        results_tab_title = QLabel("検出項目")
+        results_tab_title.setStyleSheet("font-weight: bold;")
+        results_tab_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        results_layout.addWidget(results_tab_title)
+        
+        self.results_tabs_widget = ResultsTabsWidget(self)
+        results_layout.addWidget(self.results_tabs_widget)
+        
+        content_layout.addWidget(results_frame, 1)  # 横方向に伸ばす
+        
+        central_layout.addLayout(content_layout, 1)  # 縦方向に伸ばす
+        main_layout.addWidget(central_area, 1)
 
         # --- 初期状態設定 ---
         self._set_scan_controls_enabled(False)
@@ -314,10 +448,10 @@ class ImageCleanerWindow(QMainWindow):
             self._update_ui_state(scan_enabled=True, actions_enabled=False, cancel_enabled=False)
 
             if resume_state:
-                self.status_label.setText("ステータス: 中断されたスキャンを再開します...")
+                self.status_label.setText("中断されたスキャンを再開します...")
                 self.start_scan(initial_state=resume_state)
             else:
-                self.status_label.setText("ステータス: フォルダを選択しました。スキャンを開始してください。")
+                self.status_label.setText("フォルダを選択しました。スキャンを開始してください。")
 
     @Slot()
     def open_settings(self) -> None:
@@ -347,9 +481,9 @@ class ImageCleanerWindow(QMainWindow):
             delete_scan_state(selected_dir)
 
         self._clear_all_results()
-        status_msg = f"ステータス: スキャン準備中..."
+        status_msg = "スキャン準備中..."
         if initial_state:
-            status_msg = f"ステータス: スキャン再開中..."
+            status_msg = "スキャン再開中..."
         self.status_label.setText(status_msg)
         self.current_file_label.setText(" ")
         self._set_progress_bar_visible(True)
@@ -380,7 +514,7 @@ class ImageCleanerWindow(QMainWindow):
     @Slot(str)
     def update_status(self, message: str) -> None:
         """ScanWorkerからのステータス更新シグナルを受け取るスロット"""
-        self.status_label.setText(f"ステータス: {message}")
+        self.status_label.setText(message)
 
     @Slot(int)
     def update_progress_bar(self, value: int) -> None:

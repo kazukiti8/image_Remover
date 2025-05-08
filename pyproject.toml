@@ -69,3 +69,5 @@ image-cleaner = "main:main" # `main.py` の `main` 関数を実行 (main.py に 
 # 現在の main.py は直接実行する形式なので、このセクションは必須ではないが、
 # 将来的に setuptools でインストール可能にする場合に便利
 
+[tool.setuptools.packages.find]
+where = ["src"]
