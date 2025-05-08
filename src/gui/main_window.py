@@ -200,11 +200,6 @@ class ImageCleanerWindow(QMainWindow):
         self.status_label.setWordWrap(True)
         status_layout.addWidget(self.status_label)
         
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        status_layout.addWidget(self.progress_bar)
-        
         top_layout.addWidget(status_frame)
         main_layout.addWidget(top_area)
 

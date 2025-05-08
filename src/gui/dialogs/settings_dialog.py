@@ -378,8 +378,6 @@ class SettingsDialog(QDialog):
 
         settings['hash_threshold'] = self.hash_threshold_spinbox.value()
 
-        settings['orb_nfeatures'] = self.orb_features_spinbox.value()
-
         orb_ratio_int = self.orb_ratio_spinbox.value()
         settings['orb_ratio_threshold'] = float(orb_ratio_int / 100.0)
 
