@@ -196,10 +196,6 @@ class ImageCleanerWindow(QMainWindow):
         status_layout.setContentsMargins(10, 10, 10, 10)
         status_layout.setSpacing(5)
         
-        status_title = QLabel("処理状況")
-        status_title.setStyleSheet("font-weight: bold;")
-        status_layout.addWidget(status_title)
-        
         self.status_label = QLabel("フォルダを選択してください")
         self.status_label.setWordWrap(True)
         status_layout.addWidget(self.status_label)
@@ -258,11 +254,6 @@ class ImageCleanerWindow(QMainWindow):
         preview_area.setFrameShape(QFrame.Shape.StyledPanel)
         preview_layout = QVBoxLayout(preview_area)
         preview_layout.setContentsMargins(8, 8, 8, 8)
-        
-        preview_title = QLabel("プレビュー")
-        preview_title.setStyleSheet("font-weight: bold;")
-        preview_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        preview_layout.addWidget(preview_title)
         
         self.preview_widget = PreviewWidget(self)
         preview_layout.addWidget(self.preview_widget)
@@ -830,7 +821,6 @@ class ImageCleanerWindow(QMainWindow):
         self.results_tabs_widget.clear_results()
         self.preview_widget.clear_previews()
         self.results_saved = True
-        self.current_file_label.setText(" ")
 
     def _validate_directory(self, dir_path: str, action_name: str = "処理") -> bool:
         """指定されたディレクトリパスが有効か検証する"""

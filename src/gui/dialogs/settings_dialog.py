@@ -91,7 +91,6 @@ class SettingsDialog(QDialog):
 
         self._setup_ui()
         self._update_blur_threshold_visibility()
-        self._update_similarity_options_visibility()
         self._populate_preset_combobox()
 
     # ★★★ ヘルプボタン付きウィジェット作成関数 ★★★
@@ -229,15 +228,6 @@ class SettingsDialog(QDialog):
         self.hash_threshold_spinbox.setMinimumHeight(25)
         # ★ ヘルプボタン付きで追加 ★
         similar_layout.addRow(self.hash_threshold_label, self._create_widget_with_help(self.hash_threshold_spinbox, HELP_TEXTS["hash_threshold"]))
-
-        similar_layout.addRow(QLabel("-" * 30)) # 区切り線
-        self.orb_features_label = QLabel("ORB 特徴点数:")
-        self.orb_features_spinbox = QSpinBox()
-        self.orb_features_spinbox.setRange(100, 10000); self.orb_features_spinbox.setSingleStep(100); self.orb_features_spinbox.setValue(int(self.current_settings.get('orb_nfeatures', 1500)))
-        self.orb_features_spinbox.setMinimumWidth(120)
-        self.orb_features_spinbox.setMinimumHeight(25)
-        # ★ ヘルプボタン付きで追加 ★
-        similar_layout.addRow(self.orb_features_label, self._create_widget_with_help(self.orb_features_spinbox, HELP_TEXTS["orb_features"]))
 
         self.orb_ratio_label = QLabel("ORB Ratio Test 閾値 (0-100):")
         self.orb_ratio_spinbox = QSpinBox()
