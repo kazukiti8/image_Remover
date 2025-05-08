@@ -68,18 +68,16 @@ class ZoomPanGraphicsView(QGraphicsView):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if self.pixmap_item is None: super().mousePressEvent(event); return
 
-        # ★★★ 右クリックでパン開始 ★★★
+        # 右クリックでパン開始
         if event.button() == Qt.MouseButton.RightButton:
             self._is_panning = True
             self._last_pan_point = event.pos()
             self.setCursor(Qt.CursorShape.ClosedHandCursor) # パン中はカーソル変更
             event.accept()
-        # ★★★ 左クリックでシグナル発行 ★★★
+        # 左クリックでシグナル発行
         elif event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit() # 左クリックシグナル発行
-            # パンは開始しないのでカーソル変更やフラグ設定はしない
             event.accept()
-        # ★★★★★★★★★★★★★★★★★★★★★★
         else:
             super().mousePressEvent(event) # 他のボタン（中ボタンなど）の処理
 
@@ -94,12 +92,11 @@ class ZoomPanGraphicsView(QGraphicsView):
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        # ★★★ 右クリックリリースでパン終了 ★★★
+        # 右クリックリリースでパン終了
         if event.button() == Qt.MouseButton.RightButton and self._is_panning:
             self._is_panning = False
             self.setCursor(Qt.CursorShape.ArrowCursor) # カーソルを元に戻す
             event.accept()
-        # ★★★★★★★★★★★★★★★★★★★★★★★
         else:
             super().mouseReleaseEvent(event) # 他のボタンリリースの処理
 
@@ -113,55 +110,59 @@ class PreviewWidget(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.left_image_path: Optional[str] = None; self.right_image_path: Optional[str] = None
-        self.left_image_size: Optional[Tuple[int, int]] = None; self.right_image_size: Optional[Tuple[int, int]] = None
-        self.left_preview_view: ZoomPanGraphicsView; self.right_preview_view: ZoomPanGraphicsView
+        self.left_image_path: Optional[str] = None
+        self.right_image_path: Optional[str] = None
+        self.left_image_size: Optional[Tuple[int, int]] = None
+        self.right_image_size: Optional[Tuple[int, int]] = None
+        self.left_preview_view: ZoomPanGraphicsView
+        self.right_preview_view: ZoomPanGraphicsView
         self.diff_checkbox: QCheckBox
+        self.right_title_label: QLabel # 右側のタイトルラベルを追加
         self._setup_ui()
 
     def _setup_ui(self) -> None:
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(8)
-        
-        # プレビュータイトル（よりわかりやすく）
+
+        # プレビュータイトル
         title_layout = QHBoxLayout()
-        left_title = QLabel("元の画像")
+        left_title = QLabel("画像1")
         left_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         left_title.setStyleSheet("font-weight: bold;")
-        right_title = QLabel("比較画像")
-        right_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        right_title.setStyleSheet("font-weight: bold;")
+        self.right_title_label = QLabel("画像2") # 右側のタイトルラベルをインスタンス変数にする
+        self.right_title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.right_title_label.setStyleSheet("font-weight: bold;")
         title_layout.addWidget(left_title)
-        title_layout.addWidget(right_title)
+        title_layout.addWidget(self.right_title_label) # インスタンス変数を使用
         main_layout.addLayout(title_layout)
-        
+
         # プレビュー領域
-        preview_layout = QHBoxLayout()
-        preview_layout.setContentsMargins(0, 0, 0, 0)
-        preview_layout.setSpacing(10)
-        
+        self.preview_layout = QHBoxLayout() # レイアウトをインスタンス変数にする
+        self.preview_layout.setContentsMargins(0, 0, 0, 0)
+        self.preview_layout.setSpacing(10)
+
         # 左プレビュー
         self.left_preview_view = ZoomPanGraphicsView(self)
         self.left_preview_view.initial_label.setText("画像を選択すると\nここに表示されます")
         self.left_preview_view.setToolTip("左クリック → 削除\nAキー → 開く\nホイール → ズーム\n右ドラッグ → 移動")
         self.left_preview_view.clicked.connect(self._on_left_preview_clicked)
-        
+
         # 右プレビュー
         self.right_preview_view = ZoomPanGraphicsView(self)
         self.right_preview_view.initial_label.setText("類似/重複ペア選択で\nここに表示されます")
         self.right_preview_view.setToolTip("左クリック → 削除\nSキー → 開く\nホイール → ズーム\n右ドラッグ → 移動")
         self.right_preview_view.clicked.connect(self._on_right_preview_clicked)
-        
+
         # ボーダーと背景色を追加
         for view in [self.left_preview_view, self.right_preview_view]:
             view.setFrameShape(QFrame.Shape.StyledPanel)
             view.setFrameShadow(QFrame.Shadow.Sunken)
-        
-        preview_layout.addWidget(self.left_preview_view, 1)
-        preview_layout.addWidget(self.right_preview_view, 1)
-        main_layout.addLayout(preview_layout, 1)
-        
+
+        self.preview_layout.addWidget(self.left_preview_view, 1)
+        self.preview_layout.addWidget(self.right_preview_view, 1)
+        main_layout.addLayout(self.preview_layout, 1) # インスタンス変数を使用
+
         # 操作ガイド
         guide_layout = QHBoxLayout()
         left_guide = QLabel("Aキー: 開く | クリック: 削除")
@@ -173,7 +174,7 @@ class PreviewWidget(QWidget):
         guide_layout.addWidget(left_guide)
         guide_layout.addWidget(right_guide)
         main_layout.addLayout(guide_layout)
-        
+
         # 差分表示チェックボックス
         self.diff_checkbox = QCheckBox("差分表示（同サイズの画像のみ）")
         self.diff_checkbox.setToolTip("同じサイズの画像間の違いを視覚的に表示します")
@@ -181,18 +182,19 @@ class PreviewWidget(QWidget):
         self.diff_checkbox.toggled.connect(self._toggle_diff_view)
         main_layout.addWidget(self.diff_checkbox, 0, Qt.AlignmentFlag.AlignCenter)
 
-    # ... (他のメソッドは変更なし) ...
     def _load_image_and_get_size(self, image_path: str, mode: str = 'rgb') -> LoadResult:
         img_np, error_msg = load_image_as_numpy(image_path, mode=mode)
         if img_np is not None and error_msg is None:
             try: h, w = img_np.shape[:2]; return img_np, None, (w, h)
             except Exception as e: return None, f"サイズ取得エラー: {e}", None
         return img_np, error_msg, None
+
     def _calculate_difference(self, img1_bgr: NumpyImageType, img2_bgr: NumpyImageType) -> Optional[NumpyImageType]:
         if img1_bgr.shape != img2_bgr.shape: print("差分計算スキップ..."); return None
         try: diff = cv2.absdiff(img1_bgr, img2_bgr); return diff
         except cv2.error as e: print(f"差分計算エラー (OpenCV): {e}"); return None
         except Exception as e: print(f"差分計算エラー: {e}"); return None
+
     def _numpy_to_pixmap(self, img_np: NumpyImageType) -> Optional[QPixmap]:
         if img_np is None: return None
         try:
@@ -202,11 +204,12 @@ class PreviewWidget(QWidget):
             else: print("未対応のNumpy配列形式です。"); return None
             return QPixmap.fromImage(qt_image)
         except Exception as e: print(f"NumPyからPixmapへの変換エラー: {e}"); return None
+
     def _display_image(self, target_view: ZoomPanGraphicsView, image_path: Optional[str], label_name: str) -> None:
         target_view.clear_image(); current_size: Optional[Tuple[int, int]] = None
         if image_path and os.path.exists(image_path):
             img_bgr, error_msg, img_size = self._load_image_and_get_size(image_path, mode='bgr')
-            if error_msg: print(f"プレビュー画像読込エラー..."); target_view.initial_label.setText(f"{label_name}\n(読込エラー)"); target_view.initial_label.setVisible(True)
+            if error_msg: print(f"プレビュー画像読込エラー: {error_msg}"); target_view.initial_label.setText(f"{label_name}\n(読込エラー)"); target_view.initial_label.setVisible(True)
             elif img_bgr is not None:
                 pixmap = self._numpy_to_pixmap(img_bgr)
                 if pixmap: target_view.set_image(pixmap); current_size = img_size
@@ -214,54 +217,138 @@ class PreviewWidget(QWidget):
             else: target_view.initial_label.setText(f"{label_name}\n(データなし)"); target_view.initial_label.setVisible(True)
         elif image_path: target_view.initial_label.setText(f"{label_name}\n(ファイルなし)"); target_view.initial_label.setVisible(True)
         else: target_view.initial_label.setText(f"{label_name}"); target_view.initial_label.setVisible(True)
+
         if target_view == self.left_preview_view: self.left_image_size = current_size
         elif target_view == self.right_preview_view: self.right_image_size = current_size
-        self._update_diff_checkbox_state()
+
+        # 差分チェックボックスの状態更新は update_previews で一括で行う
+
     def _display_difference(self) -> None:
-        if not self.left_image_path or not self.right_image_path: print("差分表示エラー..."); return
+        if not self.left_image_path or not self.right_image_path:
+            print("差分表示エラー: パスがありません")
+            self.right_preview_view.initial_label.setText("右プレビュー\n(差分計算不可)")
+            self.right_preview_view.clear_image()
+            return
+
         img1_bgr, err1, size1 = self._load_image_and_get_size(self.left_image_path, mode='bgr')
         img2_bgr, err2, size2 = self._load_image_and_get_size(self.right_image_path, mode='bgr')
-        if err1 or err2 or img1_bgr is None or img2_bgr is None: print("差分表示エラー..."); self.right_preview_view.initial_label.setText("右プレビュー\n(差分計算エラー)"); self.right_preview_view.clear_image(); return
+
+        if err1 or err2 or img1_bgr is None or img2_bgr is None:
+            print(f"差分表示エラー: 画像読込エラー (左: {err1}, 右: {err2})")
+            self.right_preview_view.initial_label.setText("右プレビュー\n(差分計算エラー)")
+            self.right_preview_view.clear_image()
+            return
+
         diff_img = self._calculate_difference(img1_bgr, img2_bgr)
+
         if diff_img is not None:
             diff_pixmap = self._numpy_to_pixmap(diff_img)
-            if diff_pixmap: self.right_preview_view.set_image(diff_pixmap); self.right_preview_view.initial_label.setText("差分画像")
-            else: self.right_preview_view.initial_label.setText("右プレビュー\n(差分表示エラー)"); self.right_preview_view.clear_image()
-        else: self.right_preview_view.initial_label.setText("右プレビュー\n(差分計算不可)"); self.right_preview_view.clear_image(); self.diff_checkbox.setChecked(False); self.diff_checkbox.setEnabled(False)
+            if diff_pixmap:
+                self.right_preview_view.set_image(diff_pixmap)
+                self.right_title_label.setText("差分画像") # 差分表示中はタイトル変更
+                self.right_preview_view.initial_label.setVisible(False) # 初期ラベルを非表示に
+            else:
+                print("差分画像からPixmapへの変換に失敗")
+                self.right_preview_view.initial_label.setText("右プレビュー\n(差分表示エラー)")
+                self.right_preview_view.clear_image()
+        else:
+            print("差分計算が不可または失敗")
+            self.right_preview_view.initial_label.setText("右プレビュー\n(差分計算不可)")
+            self.right_preview_view.clear_image()
+            self.diff_checkbox.setChecked(False)
+            self.diff_checkbox.setEnabled(False)
+
+
     def _update_diff_checkbox_state(self) -> None:
-        both_images_loaded: bool = bool(self.left_image_path and self.right_image_path)
-        sizes_match: bool = (self.left_image_size is not None and self.right_image_size is not None and self.left_image_size == self.right_image_size)
-        can_show_diff: bool = both_images_loaded and sizes_match
-        self.diff_checkbox.setEnabled(bool(can_show_diff))
-        if not can_show_diff: self.diff_checkbox.setChecked(False)
+        """差分表示チェックボックスの有効/無効を更新"""
+        # 右プレビューが表示されているか
+        right_preview_visible = self.right_preview_view.isVisible()
+        # 左右両方の画像パスがあり、ファイルが存在し、サイズが一致する場合に有効
+        both_images_loaded = bool(self.left_image_path and os.path.exists(str(self.left_image_path)) and
+                                  self.right_image_path and os.path.exists(str(self.right_image_path)))
+        sizes_match = (self.left_image_size is not None and self.right_image_size is not None and
+                       self.left_image_size == self.right_image_size)
+
+        can_show_diff = right_preview_visible and both_images_loaded and sizes_match
+        self.diff_checkbox.setEnabled(can_show_diff)
+
+        # 差分表示が不可能になった場合はチェックを外す
+        if not can_show_diff and self.diff_checkbox.isChecked():
+             self.diff_checkbox.setChecked(False)
+
     @Slot(bool)
     def _toggle_diff_view(self, checked: bool) -> None:
-        if checked: self._display_difference()
-        else: self._display_image(self.right_preview_view, self.right_image_path, "右プレビュー")
-    @Slot(str, str)
-    def update_previews(self, left_path: Optional[str], right_path: Optional[str]) -> None:
-        left_changed = self.left_image_path != left_path; right_changed = self.right_image_path != right_path
-        self.left_image_path = left_path; self.right_image_path = right_path
-        self._display_image(self.left_preview_view, self.left_image_path, "左プレビュー")
-        self._display_image(self.right_preview_view, self.right_image_path, "右プレビュー")
-        self._update_diff_checkbox_state()
-        if self.diff_checkbox.isChecked() and self.diff_checkbox.isEnabled(): self._display_difference()
+        """差分表示チェックボックスの状態に応じて表示を切り替える"""
+        # 右プレビューが表示されている場合のみ処理
+        if self.right_preview_view.isVisible():
+            if checked:
+                self._display_difference()
+            else:
+                # 通常の右プレビュー表示に戻す
+                self._display_image(self.right_preview_view, self.right_image_path, "画像2")
+                self.right_title_label.setText("画像2") # タイトルを元に戻す
+        else:
+            # 右プレビューが非表示の場合は差分表示はできない
+            self.diff_checkbox.setChecked(False)
+
+
+    # ★★★ 選択タイプを受け取るように変更 ★★★
+    @Slot(str, str, str)
+    def update_previews(self, left_path: Optional[str], right_path: Optional[str], selection_type: str) -> None:
+        """
+        プレビュー画像を更新する。
+        selection_type: 'blurry', 'similar', 'duplicate' のいずれか
+        """
+        self.left_image_path = left_path
+        self.right_image_path = right_path
+
+        self._display_image(self.left_preview_view, self.left_image_path, "画像1")
+
+        if selection_type == 'blurry':
+            # ブレ画像の場合は右プレビューを非表示にし、クリアする
+            self.right_preview_view.clear_image()
+            self.right_preview_view.setVisible(False)
+            self.right_title_label.setVisible(False) # タイトルも非表示に
+            self.diff_checkbox.setEnabled(False) # 差分表示も無効に
+            self.diff_checkbox.setChecked(False)
+        else: # 'similar' or 'duplicate'
+            # 類似/重複ペアの場合は右プレビューを表示する
+            self.right_preview_view.setVisible(True)
+            self.right_title_label.setVisible(True) # タイトルも表示に
+            self._display_image(self.right_preview_view, self.right_image_path, "画像2")
+            self.right_title_label.setText("画像2") # タイトルを「比較画像」に設定
+            self._update_diff_checkbox_state() # 差分チェックボックスの状態を更新
+
     @Slot()
     def clear_previews(self) -> None:
-        self.left_preview_view.clear_image(); self.right_preview_view.clear_image()
-        self.left_image_path = None; self.right_image_path = None
-        self.left_image_size = None; self.right_image_size = None
-        self.diff_checkbox.setChecked(False); self.diff_checkbox.setEnabled(False)
+        """プレビュー表示を全てクリアする"""
+        self.left_preview_view.clear_image()
+        self.right_preview_view.clear_image()
+        self.left_image_path = None
+        self.right_image_path = None
+        self.left_image_size = None
+        self.right_image_size = None
+        self.diff_checkbox.setChecked(False)
+        self.diff_checkbox.setEnabled(False)
+        # 右プレビューをデフォルトで表示状態に戻す（クリア後に非表示のままにならないように）
+        self.right_preview_view.setVisible(True)
+        self.right_title_label.setVisible(True)
+        self.right_title_label.setText("画像2") # タイトルを元に戻す
+
+
     @Slot()
     def _on_left_preview_clicked(self) -> None:
         if self.left_image_path:
             print(f"左プレビュークリック検出: {self.left_image_path}")
             self.left_preview_clicked.emit(self.left_image_path)
+
     @Slot()
     def _on_right_preview_clicked(self) -> None:
-        if self.right_image_path:
+        # 右プレビューが表示されている場合のみクリックイベントを処理
+        if self.right_preview_view.isVisible() and self.right_image_path:
             print(f"右プレビュークリック検出: {self.right_image_path}")
             self.right_preview_clicked.emit(self.right_image_path)
+
     def get_left_image_path(self) -> Optional[str]: return self.left_image_path
     def get_right_image_path(self) -> Optional[str]: return self.right_image_path
 

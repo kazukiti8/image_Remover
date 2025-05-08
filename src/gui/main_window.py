@@ -6,7 +6,7 @@ import traceback # エラー時のトレースバック表示用
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QFrame, QFileDialog, QProgressBar,
-    QMessageBox, QMenuBar, QTableWidget, QAbstractItemView # QTableWidget, QAbstractItemView 追加
+    QMessageBox, QMenuBar, QTableWidget, QAbstractItemView
 )
 from PySide6.QtCore import Qt, QThreadPool, Slot, QDir
 from PySide6.QtGui import QCloseEvent, QKeyEvent, QAction, QActionGroup
@@ -79,13 +79,14 @@ class ImageCleanerWindow(QMainWindow):
         self.results_tabs_widget: ResultsTabsWidget
         self.delete_button: QPushButton
         self.select_all_blurry_button: QPushButton
-        self.select_all_duplicates_button: QPushButton # 名前変更済み
+        self.select_all_duplicates_button: QPushButton
         self.deselect_all_button: QPushButton
         # --- その他のインスタンス変数 ---
         self.current_worker: Optional[ScanWorker] = None
         self.results_saved: bool = True
         self.light_theme_action: Optional[QAction] = None
         self.dark_theme_action: Optional[QAction] = None
+        self._cancellation_requested: bool = False # 中止要求フラグを追加
 
         self._setup_ui()
         self._setup_menu()
@@ -118,88 +119,98 @@ class ImageCleanerWindow(QMainWindow):
         top_layout = QVBoxLayout(top_area)
         top_layout.setContentsMargins(15, 15, 15, 15)
         top_layout.setSpacing(12)
-        
+
         # フォルダ選択行
         folder_frame = QFrame()
         folder_frame.setFrameShape(QFrame.Shape.StyledPanel)
         folder_layout = QHBoxLayout(folder_frame)
         folder_layout.setContentsMargins(10, 10, 10, 10)
-        
+
         self.dir_label = QLabel("対象フォルダ:")
         self.dir_path_edit = QLineEdit()
         self.dir_path_edit.setReadOnly(True)
         self.dir_path_edit.setMinimumHeight(30)
         self.select_dir_button = QPushButton("フォルダ選択")
         self.select_dir_button.setMinimumHeight(30)
-        
+
         folder_layout.addWidget(self.dir_label)
         folder_layout.addWidget(self.dir_path_edit, 1)
         folder_layout.addWidget(self.select_dir_button)
         top_layout.addWidget(folder_frame)
-        
+
         # スキャンボタンと設定ボタン
         button_layout = QHBoxLayout()
         button_layout.setSpacing(10)
-        
+
         # メインアクションボタン
         action_frame = QFrame()
         action_frame.setFrameShape(QFrame.Shape.StyledPanel)
         action_layout = QHBoxLayout(action_frame)
         action_layout.setContentsMargins(10, 10, 10, 10)
-        
+
         self.scan_button = QPushButton("スキャン開始")
         self.scan_button.setObjectName("scan_button")
         self.scan_button.setMinimumHeight(40)
         self.scan_button.setMinimumWidth(150)
         self.scan_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_MediaPlay))
-        
+
         self.cancel_button = QPushButton("中止")
         self.cancel_button.setObjectName("cancel_button")
         self.cancel_button.setMinimumHeight(40)
         self.cancel_button.setMinimumWidth(150)
         self.cancel_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_MediaStop))
         self.cancel_button.setVisible(False)
-        
+
         action_layout.addWidget(self.scan_button)
         action_layout.addWidget(self.cancel_button)
         button_layout.addWidget(action_frame)
-        
+
         # ユーティリティボタン
         util_frame = QFrame()
         util_frame.setFrameShape(QFrame.Shape.StyledPanel)
         util_layout = QHBoxLayout(util_frame)
         util_layout.setContentsMargins(10, 10, 10, 10)
-        
+
         self.settings_button = QPushButton("設定")
         self.settings_button.setMinimumHeight(40)
         self.settings_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_FileDialogDetailedView))
-        
+
         self.save_results_button = QPushButton("結果保存")
         self.save_results_button.setMinimumHeight(40)
         self.save_results_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DialogSaveButton))
-        
+
         self.load_results_button = QPushButton("結果読込")
         self.load_results_button.setMinimumHeight(40)
         self.load_results_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DialogOpenButton))
-        
+
         util_layout.addWidget(self.settings_button)
         util_layout.addWidget(self.save_results_button)
         util_layout.addWidget(self.load_results_button)
-        
+
         button_layout.addWidget(util_frame, 1)  # 右側を広く
         top_layout.addLayout(button_layout)
-        
+
         # ステータス表示エリア
         status_frame = QFrame()
         status_frame.setFrameShape(QFrame.Shape.StyledPanel)
         status_layout = QVBoxLayout(status_frame)
         status_layout.setContentsMargins(10, 10, 10, 10)
         status_layout.setSpacing(5)
-        
+
         self.status_label = QLabel("フォルダを選択してください")
         self.status_label.setWordWrap(True)
         status_layout.addWidget(self.status_label)
-        
+
+        self.current_file_label = QLabel(" ") # 現在処理中のファイル名表示ラベル
+        self.current_file_label.setStyleSheet("font-size: 9pt; color: #666;")
+        status_layout.addWidget(self.current_file_label)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setMaximum(100)
+        self._set_progress_bar_visible(False) # 初期状態では非表示
+        status_layout.addWidget(self.progress_bar)
+
         top_layout.addWidget(status_frame)
         main_layout.addWidget(top_area)
 
@@ -209,65 +220,65 @@ class ImageCleanerWindow(QMainWindow):
         central_layout = QVBoxLayout(central_area)
         central_layout.setContentsMargins(15, 15, 15, 15)
         central_layout.setSpacing(12)
-        
+
         # 操作ボタン
         action_frame = QFrame()
         action_frame.setFrameShape(QFrame.Shape.StyledPanel)
         action_layout = QHBoxLayout(action_frame)
         action_layout.setContentsMargins(10, 10, 10, 10)
-        
+
         self.delete_button = QPushButton("選択項目を削除")
         self.delete_button.setObjectName("delete_button")
         self.delete_button.setToolTip("現在表示中のタブで選択されている項目をゴミ箱に移動します")
         self.delete_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_TrashIcon))
         self.delete_button.setMinimumHeight(36)
-        
+
         # 選択ボタンはアイコンつきに
         self.select_all_blurry_button = QPushButton("ブレ画像選択")
         self.select_all_blurry_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DialogApplyButton))
-        
+
         self.select_all_duplicates_button = QPushButton("重複選択")
         self.select_all_duplicates_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DialogApplyButton))
-        
+
         self.deselect_all_button = QPushButton("選択解除")
         self.deselect_all_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DialogCancelButton))
-        
+
         action_layout.addWidget(self.delete_button)
         action_layout.addStretch()
         action_layout.addWidget(self.select_all_blurry_button)
         action_layout.addWidget(self.select_all_duplicates_button)
         action_layout.addWidget(self.deselect_all_button)
-        
+
         central_layout.addWidget(action_frame)
-        
+
         # プレビューと結果を水平に並べるレイアウト
         content_layout = QHBoxLayout()
         content_layout.setSpacing(15)
-        
+
         # プレビュー
         preview_area = QFrame()
         preview_area.setFrameShape(QFrame.Shape.StyledPanel)
         preview_layout = QVBoxLayout(preview_area)
         preview_layout.setContentsMargins(8, 8, 8, 8)
-        
+
         self.preview_widget = PreviewWidget(self)
         preview_layout.addWidget(self.preview_widget)
-        
+
         # 幅を固定にして、縦に伸ばす
-        preview_area.setFixedWidth(600)  # プレビュー幅を350から600に拡大
+        preview_area.setFixedWidth(600)  # プレビュー幅を拡大
         content_layout.addWidget(preview_area)
-        
+
         # 結果タブ
         results_frame = QFrame()
         results_frame.setFrameShape(QFrame.Shape.StyledPanel)
         results_layout = QVBoxLayout(results_frame)
         results_layout.setContentsMargins(8, 8, 8, 8)
-        
+
         self.results_tabs_widget = ResultsTabsWidget(self)
         results_layout.addWidget(self.results_tabs_widget)
-        
+
         content_layout.addWidget(results_frame, 1)  # 横方向に伸ばす
-        
+
         central_layout.addLayout(content_layout, 1)  # 縦方向に伸ばす
         main_layout.addWidget(central_area, 1)
 
@@ -348,7 +359,7 @@ class ImageCleanerWindow(QMainWindow):
         # アクションボタン
         self.delete_button.clicked.connect(self.delete_selected_items)
         self.select_all_blurry_button.clicked.connect(self.results_tabs_widget.select_all_blurry)
-        self.select_all_duplicates_button.clicked.connect(self.results_tabs_widget.select_all_duplicates) # 接続先変更済み
+        self.select_all_duplicates_button.clicked.connect(self.results_tabs_widget.select_all_duplicates)
         self.deselect_all_button.clicked.connect(self.results_tabs_widget.deselect_all)
 
         # 結果タブとプレビューの連携
@@ -439,6 +450,7 @@ class ImageCleanerWindow(QMainWindow):
         self.current_file_label.setText(" ")
         self._set_progress_bar_visible(True)
         self._update_ui_state(scan_enabled=False, actions_enabled=False, cancel_enabled=True)
+        self._cancellation_requested = False # スキャン開始時にフラグをリセット
 
         self.current_worker = ScanWorker(selected_dir, self.current_settings, initial_state=initial_state)
         self.current_worker.signals.status_update.connect(self.update_status)
@@ -458,6 +470,7 @@ class ImageCleanerWindow(QMainWindow):
         if self.current_worker:
             self.status_label.setText("ステータス: 中止処理中...")
             self.cancel_button.setEnabled(False)
+            self._cancellation_requested = True # 中止要求フラグをセット
             self.current_worker.request_cancellation()
         else:
             print("警告: 中止対象のワーカースレッドが見つかりません。")
@@ -493,6 +506,7 @@ class ImageCleanerWindow(QMainWindow):
         self._update_ui_state(scan_enabled=True, actions_enabled=has_results, cancel_enabled=False)
         self.results_saved = False
         self.current_worker = None
+        self._cancellation_requested = False # 完了時はフラグをリセット
 
     @Slot(str)
     def handle_scan_error(self, message: str) -> None:
@@ -504,6 +518,7 @@ class ImageCleanerWindow(QMainWindow):
         self._update_ui_state(scan_enabled=bool(self.dir_path_edit.text()), actions_enabled=False, cancel_enabled=False)
         self.current_file_label.setText(" ")
         self.current_worker = None
+        self._cancellation_requested = False # エラー時はフラグをリセット
 
     @Slot()
     def handle_scan_finished(self) -> None:
@@ -523,6 +538,7 @@ class ImageCleanerWindow(QMainWindow):
         if self.dir_path_edit.text():
             delete_scan_state(self.dir_path_edit.text())
         self.current_worker = None
+        self._cancellation_requested = False # 完了時はフラグをリセット
 
     @Slot()
     def handle_scan_cancelled(self) -> None:
@@ -533,12 +549,28 @@ class ImageCleanerWindow(QMainWindow):
         self._update_ui_state(scan_enabled=True, actions_enabled=False, cancel_enabled=False)
         self.current_file_label.setText(" ")
         self.current_worker = None
+        self._cancellation_requested = False # 中止時はフラグをリセット
 
+    # ★★★ プレビュー表示更新ロジックを修正 ★★★
     @Slot()
     def update_preview_display(self) -> None:
         """結果タブの選択が変更されたときにプレビューを更新するスロット"""
         primary_path, secondary_path = self.results_tabs_widget.get_current_selection_paths()
-        self.preview_widget.update_previews(primary_path, secondary_path)
+        current_tab_index = self.results_tabs_widget.currentIndex()
+
+        selection_type: str
+        if current_tab_index == 0:
+            selection_type = 'blurry'
+        elif current_tab_index == 1:
+            selection_type = 'similar'
+        elif current_tab_index == 2:
+            selection_type = 'duplicate'
+        else:
+            selection_type = 'error' # エラータブの場合
+
+        # PreviewWidgetのupdate_previewsメソッドに選択タイプを渡す
+        self.preview_widget.update_previews(primary_path, secondary_path, selection_type)
+
 
     @Slot()
     def delete_selected_items(self) -> None:
@@ -644,7 +676,7 @@ class ImageCleanerWindow(QMainWindow):
                 else:
                     self.status_label.setText(f"ステータス: '{filename}' をゴミ箱に移動しました。")
             else:
-                 self.status_label.setText(f"ステータス: '{filename}' の削除処理完了 (ファイル移動なし)。")
+                 self.status_label.setText(f"ステータス: '{filename}' 削除処理完了 (ファイル移動なし)。")
             self._update_ui_state(actions_enabled=has_results_after_delete)
         else:
             print("プレビューからの削除はキャンセルされました。")
@@ -655,7 +687,7 @@ class ImageCleanerWindow(QMainWindow):
         if not file_path:
             return
 
-        # ★ 削除前に現在のテーブルと行インデックスを取得 ★
+        # 削除前に現在のテーブルと行インデックスを取得
         current_tab_index = self.results_tabs_widget.currentIndex()
         current_table: Optional[QTableWidget] = self.results_tabs_widget.widget(current_tab_index)
         if not isinstance(current_table, QTableWidget): return
@@ -665,7 +697,7 @@ class ImageCleanerWindow(QMainWindow):
         # 削除処理（確認はdelete_files_to_trash内）
         errors_occurred = self._delete_files_and_update_ui([file_path])
 
-        # ★ 削除成功後に再選択処理 ★
+        # 削除成功後に再選択処理
         deletion_successful = not errors_occurred and not self.results_saved
         if deletion_successful:
              current_table_after_delete: Optional[QTableWidget] = self.results_tabs_widget.widget(self.results_tabs_widget.currentIndex())
@@ -791,25 +823,27 @@ class ImageCleanerWindow(QMainWindow):
                 if isinstance(item_data, str) and os.path.normpath(item_data) == normalized_path_to_find:
                     return row
             elif current_tab_index == 1: # 類似ペアタブ
-                item = table.item(row, 0)
-                item_data = item.data(Qt.ItemDataRole.UserRole) if item else None
-                if isinstance(item_data, tuple) and len(item_data) == 2:
-                    path1, path2 = item_data
-                    # プレビューでクリックされたパスが path1 または path2 と一致するか確認
-                    if (path1 and os.path.normpath(path1) == normalized_path_to_find) or \
-                       (path2 and os.path.normpath(path2) == normalized_path_to_find):
-                        return row
+                # 類似ペアタブでは、ファイル1のパスは4列目、ファイル2のパスは9列目
+                item1_path_item = table.item(row, 4)
+                item2_path_item = table.item(row, 9)
+                path1: Optional[str] = item1_path_item.text() if item1_path_item else None
+                path2: Optional[str] = item2_path_item.text() if item2_path_item else None
+
+                if (path1 and os.path.normpath(path1) == normalized_path_to_find) or \
+                   (path2 and os.path.normpath(path2) == normalized_path_to_find):
+                    return row
             elif current_tab_index == 2: # 重複ペアタブ
-                item = table.item(row, 0)
-                item_data = item.data(Qt.ItemDataRole.UserRole) if item else None
-                if isinstance(item_data, dict) and 'path1' in item_data and 'path2' in item_data:
-                    path1 = item_data['path1']
-                    path2 = item_data['path2']
-                    # プレビューでクリックされたパスが path1 または path2 と一致するか確認
-                    if (path1 and os.path.normpath(path1) == normalized_path_to_find) or \
-                       (path2 and os.path.normpath(path2) == normalized_path_to_find):
-                        return row
+                 # 重複ペアタブでは、ファイル1のパスは4列目、ファイル2のパスは9列目
+                item1_path_item = table.item(row, 4)
+                item2_path_item = table.item(row, 9)
+                path1: Optional[str] = item1_path_item.text() if item1_path_item else None
+                path2: Optional[str] = item2_path_item.text() if item2_path_item else None
+
+                if (path1 and os.path.normpath(path1) == normalized_path_to_find) or \
+                   (path2 and os.path.normpath(path2) == normalized_path_to_find):
+                    return row
         return -1
+
 
     def _clear_all_results(self) -> None:
         """結果表示エリアとプレビューをクリアする"""
@@ -879,33 +913,61 @@ class ImageCleanerWindow(QMainWindow):
         elif current_tab_index == 1: # 類似ペアタブ
             # チェックボックスで選択されたファイルを取得
             for row in range(self.results_tabs_widget.similar_table.rowCount()):
-                # チェックボックス1（ファイル1）のチェック状態を確認 - インデックス4
-                chk1_item = self.results_tabs_widget.similar_table.item(row, 4)
+                # チェックボックス1（ファイル1）のチェック状態を確認 - インデックス0
+                chk1_item = self.results_tabs_widget.similar_table.item(row, 0)
                 if chk1_item and chk1_item.checkState() == Qt.CheckState.Checked:
                     path1: Optional[str] = chk1_item.data(Qt.ItemDataRole.UserRole)
                     if path1:
                         files_to_delete.append(path1)
-                
-                # チェックボックス2（ファイル2）のチェック状態を確認 - インデックス6
-                chk2_item = self.results_tabs_widget.similar_table.item(row, 6)
+
+                # チェックボックス2（ファイル2）のチェック状態を確認 - インデックス5
+                chk2_item = self.results_tabs_widget.similar_table.item(row, 5)
                 if chk2_item and chk2_item.checkState() == Qt.CheckState.Checked:
                     path2: Optional[str] = chk2_item.data(Qt.ItemDataRole.UserRole)
                     if path2:
                         files_to_delete.append(path2)
-            
+
             # 行選択されている場合はファイル2を追加（後方互換性のため）
-            if not files_to_delete:
-                selected_rows: Set[int] = set(item.row() for item in self.results_tabs_widget.similar_table.selectedItems())
-                for row in selected_rows:
-                    item = self.results_tabs_widget.similar_table.item(row, 5)  # ファイル名1の列インデックス
-                    path_data: Any = item.data(Qt.ItemDataRole.UserRole) if item else None
-                    if isinstance(path_data, tuple) and len(path_data) == 2 and path_data[1]:
-                        # 存在確認は get_selected... 内で行われる
-                        files_to_delete.append(path_data[1])
-            
+            # この部分はチェックボックス選択が主になったため、必要に応じて調整または削除
+            if not files_to_delete: # チェックボックスで何も選択されていない場合のみ
+                 selected_rows: Set[int] = set(item.row() for item in self.results_tabs_widget.similar_table.selectedItems())
+                 for row in selected_rows:
+                     # ファイル2のパスは9列目
+                     path2_item = self.results_tabs_widget.similar_table.item(row, 9)
+                     path2: Optional[str] = path2_item.text() if path2_item else None
+                     if path2:
+                         files_to_delete.append(path2)
+
+
             msg = "削除対象の類似ペアが選択されていません。"
         elif current_tab_index == 2: # 重複ペアタブ
-            files_to_delete = self.results_tabs_widget.get_selected_duplicate_paths()
+             # チェックボックスで選択されたファイルを取得
+            for row in range(self.results_tabs_widget.duplicate_table.rowCount()):
+                # チェックボックス1（ファイル1）のチェック状態を確認 - インデックス0
+                chk1_item = self.results_tabs_widget.duplicate_table.item(row, 0)
+                if chk1_item and chk1_item.checkState() == Qt.CheckState.Checked:
+                    path1: Optional[str] = chk1_item.data(Qt.ItemDataRole.UserRole)
+                    if path1:
+                        files_to_delete.append(path1)
+
+                # チェックボックス2（ファイル2）のチェック状態を確認 - インデックス5
+                chk2_item = self.results_tabs_widget.duplicate_table.item(row, 5)
+                if chk2_item and chk2_item.checkState() == Qt.CheckState.Checked:
+                    path2: Optional[str] = chk2_item.data(Qt.ItemDataRole.UserRole)
+                    if path2:
+                        files_to_delete.append(path2)
+
+            # 行選択されている場合はファイル2を追加（後方互換性のため）
+            # この部分はチェックボックス選択が主になったため、必要に応じて調整または削除
+            if not files_to_delete: # チェックボックスで何も選択されていない場合のみ
+                selected_rows: Set[int] = set(item.row() for item in self.results_tabs_widget.duplicate_table.selectedItems())
+                for row in selected_rows:
+                     # ファイル2のパスは9列目
+                    path2_item = self.results_tabs_widget.duplicate_table.item(row, 9)
+                    path2: Optional[str] = path2_item.text() if path2_item else None
+                    if path2:
+                        files_to_delete.append(path2)
+
             msg = "削除対象の重複ペアが選択されていません。"
         elif current_tab_index == 3: # エラータブ
             QMessageBox.information(self, "情報", "エラータブからは直接削除できません。")
@@ -913,9 +975,13 @@ class ImageCleanerWindow(QMainWindow):
         else:
             return []
 
+        # 重複を排除
+        files_to_delete = list(set(files_to_delete))
+
         if not files_to_delete:
             QMessageBox.information(self, "情報", msg)
         return files_to_delete
+
 
     def _delete_files_and_update_ui(self, files_to_delete: List[str]) -> List[ErrorDict]:
         """指定されたファイルリストをゴミ箱に移動し、UIを更新する"""
@@ -937,6 +1003,7 @@ class ImageCleanerWindow(QMainWindow):
     def _set_action_buttons_enabled(self, enabled: bool) -> None:
         """結果に対するアクションボタンの有効/無効を設定"""
         self.delete_button.setEnabled(enabled)
+        # ブレ画像タブの選択ボタンは常に有効でも良いかもしれないが、ここでは結果がある場合のみ有効にする
         self.select_all_blurry_button.setEnabled(enabled)
         self.select_all_duplicates_button.setEnabled(enabled)
         self.deselect_all_button.setEnabled(enabled)
@@ -965,7 +1032,7 @@ class ImageCleanerWindow(QMainWindow):
     # --- イベントハンドラ ---
     def closeEvent(self, event: QCloseEvent) -> None:
         """ウィンドウが閉じられるときのイベント"""
-        if self.current_worker and not self._cancellation_requested:
+        if self.current_worker and not self._cancellation_requested: # 中止要求フラグも確認
              reply = QMessageBox.question(
                  self, "確認", "スキャン処理が実行中です。\nアプリケーションを終了すると、現在のスキャンは中断されます。\n\n終了しますか？",
                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
@@ -973,6 +1040,9 @@ class ImageCleanerWindow(QMainWindow):
              if reply == QMessageBox.StandardButton.Yes:
                  print("終了前にスキャンを中止します...")
                  self.request_scan_cancellation()
+                 # 中止完了を待つためにイベント処理を保留
+                 event.ignore()
+                 return
              else:
                  event.ignore()
                  return
@@ -994,10 +1064,22 @@ class ImageCleanerWindow(QMainWindow):
         left_path: Optional[str] = self.preview_widget.get_left_image_path()
         right_path: Optional[str] = self.preview_widget.get_right_image_path()
 
-        if key == Qt.Key.Key_Q and left_path:
+        # 現在表示中のタブに応じて削除対象を決定
+        current_tab_index = self.results_tabs_widget.currentIndex()
+        can_delete_left = False
+        can_delete_right = False
+
+        if current_tab_index == 0 and left_path: # ブレ画像タブ
+            can_delete_left = True
+        elif current_tab_index in [1, 2]: # 類似・重複ペアタブ
+            if left_path: can_delete_left = True
+            if right_path: can_delete_right = True
+
+
+        if key == Qt.Key.Key_Q and can_delete_left:
             print("Qキー: 左プレビュー削除要求")
             self._delete_single_file_from_preview(left_path)
-        elif key == Qt.Key.Key_W and right_path:
+        elif key == Qt.Key.Key_W and can_delete_right:
             print("Wキー: 右プレビュー削除要求")
             self._delete_single_file_from_preview(right_path)
         elif key == Qt.Key.Key_A and left_path:
