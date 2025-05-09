@@ -131,10 +131,10 @@ class ResultsTabsWidget(QTabWidget):
     def _create_duplicate_table(self) -> QTableWidget:
         """重複ペア表示用のテーブルを作成"""
         headers = [
-            "ファイル1 チェック", "ファイル1 ファイル名", "ファイル1 解像度",
-            "ファイル1 作成日時", "ファイル1 パス",
-            "ファイル2 チェック", "ファイル2 ファイル名", "ファイル2 解像度",
-            "ファイル2 作成日時", "ファイル2 パス"
+            "", "ファイル名", "解像度",
+            "作成日時", "パス",
+            "チェック", "ファイル名", "解像度",
+            "作成日時", "パス"
         ]
         table = self._create_table_widget(len(headers), headers, QAbstractItemView.SelectionMode.ExtendedSelection)
         # リサイズモード設定 (新しいカラム数に合わせて調整)
@@ -584,10 +584,10 @@ class ResultsTabsWidget(QTabWidget):
         base_name2: str = os.path.basename(path2) if path2 else "N/A"
 
         context_menu = QMenu(self)
-        action_delete1 = QAction(f"ファイル1を削除 ({base_name1})", self)
-        action_delete2 = QAction(f"ファイル2を削除 ({base_name2})", self)
-        action_open1 = QAction(f"ファイル1を開く ({base_name1})", self)
-        action_open2 = QAction(f"ファイル2を開く ({base_name2})", self)
+        action_delete1 = QAction(f"左画像を削除 ({base_name1})", self)
+        action_delete2 = QAction(f"右画像を削除 ({base_name2})", self)
+        action_open1 = QAction(f"左画像を開く ({base_name1})", self)
+        action_open2 = QAction(f"右画像を開く ({base_name2})", self)
 
         action_delete1.setEnabled(bool(path1 and os.path.exists(path1)))
         action_delete2.setEnabled(bool(path2 and os.path.exists(path2)))
@@ -625,10 +625,10 @@ class ResultsTabsWidget(QTabWidget):
         base_name2: str = os.path.basename(path2) if path2 else "N/A"
 
         context_menu = QMenu(self)
-        action_delete1 = QAction(f"ファイル1を削除 ({base_name1})", self)
-        action_delete2 = QAction(f"ファイル2を削除 ({base_name2})", self)
-        action_open1 = QAction(f"ファイル1を開く ({base_name1})", self)
-        action_open2 = QAction(f"ファイル2を開く ({base_name2})", self)
+        action_delete1 = QAction(f"左画像を削除 ({base_name1})", self)
+        action_delete2 = QAction(f"右画像を削除 ({base_name2})", self)
+        action_open1 = QAction(f"左画像を開く ({base_name1})", self)
+        action_open2 = QAction(f"右画像を開く ({base_name2})", self)
 
         action_delete1.setEnabled(bool(path1 and os.path.exists(path1)))
         action_delete2.setEnabled(bool(path2 and os.path.exists(path2)))
