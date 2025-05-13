@@ -39,7 +39,7 @@ except ImportError as e:
 # --- ユーティリティ関数をインポート ---
 try:
     from utils.config_handler import load_settings, save_settings
-    from utils.file_operations import delete_files_to_trash, open_file_external
+    from utils.file_operations import delete_files_to_trash, open_file_external, rename_images_to_sequence
     from utils.results_handler import save_results_to_file, load_results_from_file, load_scan_state, delete_scan_state, get_state_filepath
 except ImportError as e:
     print(f"エラー: ユーティリティモジュールのインポートに失敗 ({e})")
@@ -165,53 +165,32 @@ class ImageCleanerWindow(QMainWindow):
         action_layout.addWidget(self.cancel_button)
         button_layout.addWidget(action_frame)
 
-        # ユーティリティボタン
+        # ユーティリティエリア（プログレスバーとステータス表示用）
         util_frame = QFrame()
         util_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        util_layout = QHBoxLayout(util_frame)
+        util_layout = QVBoxLayout(util_frame)
         util_layout.setContentsMargins(10, 10, 10, 10)
-
-        self.settings_button = QPushButton("設定")
-        self.settings_button.setMinimumHeight(40)
-        self.settings_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_FileDialogDetailedView))
-
-        self.save_results_button = QPushButton("結果保存")
-        self.save_results_button.setMinimumHeight(40)
-        self.save_results_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DialogSaveButton))
-
-        self.load_results_button = QPushButton("結果読込")
-        self.load_results_button.setMinimumHeight(40)
-        self.load_results_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DialogOpenButton))
-
-        util_layout.addWidget(self.settings_button)
-        util_layout.addWidget(self.save_results_button)
-        util_layout.addWidget(self.load_results_button)
-
-        button_layout.addWidget(util_frame, 1)  # 右側を広く
-        top_layout.addLayout(button_layout)
-
-        # ステータス表示エリア
-        status_frame = QFrame()
-        status_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        status_layout = QVBoxLayout(status_frame)
-        status_layout.setContentsMargins(10, 10, 10, 10)
-        status_layout.setSpacing(5)
-
+        util_layout.setSpacing(5)
+        
+        # ステータス表示をこちらに移動
         self.status_label = QLabel("フォルダを選択してください")
         self.status_label.setWordWrap(True)
-        status_layout.addWidget(self.status_label)
-
+        util_layout.addWidget(self.status_label)
+        
         self.current_file_label = QLabel(" ") # 現在処理中のファイル名表示ラベル
         self.current_file_label.setStyleSheet("font-size: 9pt; color: #666;")
-        status_layout.addWidget(self.current_file_label)
-
+        util_layout.addWidget(self.current_file_label)
+        
+        # プログレスバーをこちらに移動
         self.progress_bar = QProgressBar()
         self.progress_bar.setMinimum(0)
         self.progress_bar.setMaximum(100)
         self._set_progress_bar_visible(False) # 初期状態では非表示
-        status_layout.addWidget(self.progress_bar)
+        util_layout.addWidget(self.progress_bar)
 
-        top_layout.addWidget(status_frame)
+        button_layout.addWidget(util_frame, 1)  # 右側を広く
+        top_layout.addLayout(button_layout)
+
         main_layout.addWidget(top_area)
 
         # --- 中央エリア: 結果とプレビュー ---
@@ -285,8 +264,12 @@ class ImageCleanerWindow(QMainWindow):
         # --- 初期状態設定 ---
         self._set_scan_controls_enabled(False)
         self._set_action_buttons_enabled(False)
-        self.save_results_button.setEnabled(False)
-        self.load_results_button.setEnabled(True)
+        
+        # メニューアクションの初期状態設定
+        if hasattr(self, 'save_results_action'):
+            self.save_results_action.setEnabled(False)
+        if hasattr(self, 'load_results_action'):
+            self.load_results_action.setEnabled(True)
 
     def _setup_menu(self):
         """メニューバーとテーマ切り替えメニューを作成"""
@@ -295,6 +278,41 @@ class ImageCleanerWindow(QMainWindow):
             menu_bar = QMenuBar(self)
             self.setMenuBar(menu_bar)
 
+        # 機能メニューを追加
+        func_menu = menu_bar.addMenu("機能(&F)")
+        
+        # 設定アクション
+        self.settings_action = QAction("設定...", self)
+        self.settings_action.triggered.connect(self.open_settings)
+        self.settings_action.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_FileDialogDetailedView))
+        func_menu.addAction(self.settings_action)
+        
+        # セパレータ
+        func_menu.addSeparator()
+        
+        # 結果保存アクション
+        self.save_results_action = QAction("結果保存...", self)
+        self.save_results_action.triggered.connect(self.save_results)
+        self.save_results_action.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DialogSaveButton))
+        func_menu.addAction(self.save_results_action)
+        
+        # 結果読込アクション
+        self.load_results_action = QAction("結果読込...", self)
+        self.load_results_action.triggered.connect(self.load_results)
+        self.load_results_action.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DialogOpenButton))
+        func_menu.addAction(self.load_results_action)
+        
+        # セパレータ
+        func_menu.addSeparator()
+        
+        # 画像連番リネームアクション
+        self.rename_images_action = QAction("画像を連番にリネーム...", self)
+        self.rename_images_action.triggered.connect(self.rename_images_to_sequential)
+        self.rename_images_action.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_FileDialogListView))
+        self.rename_images_action.setToolTip("選択したフォルダ内の画像ファイルを1, 2, 3...のように連番にリネームします")
+        func_menu.addAction(self.rename_images_action)
+        
+        # 表示メニュー
         view_menu = menu_bar.addMenu("表示(&V)")
         theme_menu = view_menu.addMenu("テーマ(&T)")
         theme_group = QActionGroup(self)
@@ -350,11 +368,8 @@ class ImageCleanerWindow(QMainWindow):
     def _connect_signals(self) -> None:
         """UI要素のシグナルとスロットを接続"""
         self.select_dir_button.clicked.connect(self.select_directory)
-        self.settings_button.clicked.connect(self.open_settings)
         self.scan_button.clicked.connect(self.start_scan)
         self.cancel_button.clicked.connect(self.request_scan_cancellation)
-        self.save_results_button.clicked.connect(self.save_results)
-        self.load_results_button.clicked.connect(self.load_results)
 
         # アクションボタン
         self.delete_button.clicked.connect(self.delete_selected_items)
@@ -736,6 +751,42 @@ class ImageCleanerWindow(QMainWindow):
         print(f"オープン要求受信: {file_path}")
         if file_path:
             open_file_external(file_path, self)
+            
+    @Slot()
+    def rename_images_to_sequential(self) -> None:
+        """画像ファイルを連番にリネームする機能"""
+        current_dir: str = self.dir_path_edit.text()
+        if not self._validate_directory(current_dir, "画像リネーム"):
+            return
+
+        # 進捗表示を更新
+        self.status_label.setText(f"ステータス: 画像ファイルの連番リネームを準備中...")
+        self._set_progress_bar_visible(True)
+        self.progress_bar.setValue(10)
+        QApplication.processEvents()
+
+        # リネーム処理を実行
+        self.status_label.setText(f"ステータス: リネーム処理を実行中...")
+        self.progress_bar.setValue(50)
+        QApplication.processEvents()
+        
+        renamed_count, errors = rename_images_to_sequence(current_dir, self)
+        
+        # 進捗表示を完了に設定
+        self.progress_bar.setValue(100)
+        QApplication.processEvents()
+        
+        # 処理完了後、プログレスバーを非表示に
+        self._set_progress_bar_visible(False)
+        
+        # 結果をステータスに表示
+        if renamed_count > 0:
+            self.status_label.setText(f"ステータス: {renamed_count} 個のファイルを連番にリネームしました。")
+        else:
+            if not errors:
+                self.status_label.setText(f"ステータス: リネーム処理はキャンセルされたか、対象ファイルがありませんでした。")
+            else:
+                self.status_label.setText(f"ステータス: リネーム処理中にエラーが発生しました。")
 
     @Slot()
     def save_results(self) -> None:
@@ -748,15 +799,43 @@ class ImageCleanerWindow(QMainWindow):
         if not filepath:
             return
 
+        # 保存開始時にUI状態を更新
+        self.status_label.setText(f"ステータス: 結果を '{os.path.basename(filepath)}' に保存準備中...")
+        self._set_progress_bar_visible(True)
+        self.progress_bar.setValue(10)  # 初期進捗表示
+        QApplication.processEvents()  # UIを更新
+
         self.current_settings['last_save_load_dir'] = os.path.dirname(filepath)
+
+        # 進捗表示を更新
+        self.status_label.setText(f"ステータス: 結果データを収集中...")
+        self.progress_bar.setValue(30)
+        QApplication.processEvents()
+
         results_data: ResultsData = self.results_tabs_widget.get_results_data()
+
+        # 進捗表示を更新
+        self.status_label.setText(f"ステータス: 結果をファイルに書き込み中...")
+        self.progress_bar.setValue(70)
+        QApplication.processEvents()
+
         success: bool = save_results_to_file(filepath, results_data, current_dir, self.current_settings)
 
+        # 進捗表示を完了に設定
+        self.progress_bar.setValue(100)
+        QApplication.processEvents()
+
+        # 結果に応じたメッセージを表示
         if success:
+            self.status_label.setText(f"ステータス: 結果をファイルに保存しました: {os.path.basename(filepath)}")
             QMessageBox.information(self, "保存完了", f"結果をファイルに保存しました:\n{filepath}")
             self.results_saved = True
         else:
+            self.status_label.setText(f"ステータス: 保存中にエラーが発生しました")
             QMessageBox.critical(self, "保存エラー", "結果のファイルへの保存中にエラーが発生しました。")
+        
+        # 処理完了後、プログレスバーを非表示に
+        self._set_progress_bar_visible(False)
 
     @Slot()
     def load_results(self) -> None:
@@ -769,7 +848,18 @@ class ImageCleanerWindow(QMainWindow):
         if not filepath:
             return
 
+        # 読み込み開始時にUI状態を更新
+        self.status_label.setText(f"ステータス: 結果ファイル '{os.path.basename(filepath)}' を読み込み中...")
+        self._set_progress_bar_visible(True)
+        self.progress_bar.setValue(10)  # 初期進捗表示
+        QApplication.processEvents()  # UIを更新
+
         self.current_settings['last_save_load_dir'] = os.path.dirname(filepath)
+
+        # 進捗表示を更新
+        self.status_label.setText(f"ステータス: ファイルからデータを読み込み中...")
+        self.progress_bar.setValue(30)
+        QApplication.processEvents()
 
         results_data: Optional[ResultsData]
         scanned_directory: Optional[str]
@@ -777,19 +867,40 @@ class ImageCleanerWindow(QMainWindow):
         error_message: Optional[str]
         results_data, scanned_directory, settings_used, error_message = load_results_from_file(filepath)
 
+        # エラー処理
         if error_message:
+            self._set_progress_bar_visible(False)
+            self.status_label.setText(f"ステータス: 読み込みエラー - {error_message}")
             QMessageBox.critical(self, "読み込みエラー", f"結果ファイルの読み込み中にエラーが発生しました:\n{error_message}")
             return
 
+        # 進捗表示を更新
+        self.status_label.setText(f"ステータス: 対象ディレクトリを確認中...")
+        self.progress_bar.setValue(50)
+        QApplication.processEvents()
+
         current_target_dir: str = self.dir_path_edit.text()
         if not self._confirm_directory_mismatch(scanned_directory, current_target_dir):
+            self._set_progress_bar_visible(False)
+            self.status_label.setText("ステータス: 読み込みがキャンセルされました")
             return
 
         if scanned_directory and scanned_directory != current_target_dir:
             self.dir_path_edit.setText(scanned_directory)
             self.current_settings['last_directory'] = scanned_directory
 
+        # 進捗表示を更新
+        self.status_label.setText(f"ステータス: 結果をクリアして新しいデータを準備中...")
+        self.progress_bar.setValue(70)
+        QApplication.processEvents()
+
         self._clear_all_results()
+        
+        # 進捗表示を更新
+        self.status_label.setText(f"ステータス: 結果データを表示用に処理中...")
+        self.progress_bar.setValue(80)
+        QApplication.processEvents()
+        
         if results_data:
             # populate_results 内で存在しないファイルはフィルタリングされる
             self.results_tabs_widget.populate_results(
@@ -802,7 +913,16 @@ class ImageCleanerWindow(QMainWindow):
         if settings_used:
             print("読み込んだ結果のスキャン時設定:", settings_used)
 
+        # 進捗表示を完了に設定
+        self.progress_bar.setValue(100)
+        QApplication.processEvents()
+        
+        # 完了メッセージの表示
         self.status_label.setText(f"ステータス: 結果を読み込みました: {os.path.basename(filepath)}")
+        
+        # プログレスバーを非表示に
+        self._set_progress_bar_visible(False)
+        
         has_results: bool = (self.results_tabs_widget.blurry_table.rowCount() > 0 or
                              self.results_tabs_widget.similar_table.rowCount() > 0 or
                              self.results_tabs_widget.duplicate_table.rowCount() > 0)
@@ -998,7 +1118,10 @@ class ImageCleanerWindow(QMainWindow):
     def _set_scan_controls_enabled(self, enabled: bool) -> None:
         """スキャン関連のボタンの有効/無効を設定"""
         self.scan_button.setEnabled(enabled)
-        self.settings_button.setEnabled(enabled)
+        
+        # メニューアクションの状態も更新
+        if hasattr(self, 'settings_action'):
+            self.settings_action.setEnabled(enabled)
 
     def _set_action_buttons_enabled(self, enabled: bool) -> None:
         """結果に対するアクションボタンの有効/無効を設定"""
@@ -1007,7 +1130,13 @@ class ImageCleanerWindow(QMainWindow):
         self.select_all_blurry_button.setEnabled(enabled)
         self.select_all_duplicates_button.setEnabled(enabled)
         self.deselect_all_button.setEnabled(enabled)
-        self.save_results_button.setEnabled(enabled)
+        
+        # メニューアクションの状態も更新
+        if hasattr(self, 'save_results_action'):
+            self.save_results_action.setEnabled(enabled)
+        if hasattr(self, 'load_results_action'):
+            # 結果読込は常に有効
+            self.load_results_action.setEnabled(True)
 
     def _set_progress_bar_visible(self, visible: bool) -> None:
         """プログレスバーの表示/非表示を設定"""
@@ -1028,6 +1157,10 @@ class ImageCleanerWindow(QMainWindow):
         if cancel_enabled is not None:
             self.cancel_button.setVisible(cancel_enabled)
             self.cancel_button.setEnabled(cancel_enabled)
+        
+        # メニューアクションの状態も更新
+        if hasattr(self, 'settings_action'):
+            self.settings_action.setEnabled(self.settings_button.isEnabled())
 
     # --- イベントハンドラ ---
     def closeEvent(self, event: QCloseEvent) -> None:

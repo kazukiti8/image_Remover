@@ -67,12 +67,10 @@ class ResultsTabsWidget(QTabWidget):
         self.similar_table = self._create_similar_table()
         self.similar_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.similar_table.customContextMenuRequested.connect(self._show_similar_table_context_menu)
-        self.addTab(self.similar_table, "類似ペア (0)")
+        self.addTab(self.similar_table, "類似/重複ペア (0)")
 
-        self.duplicate_table = self._create_duplicate_table()
-        self.duplicate_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.duplicate_table.customContextMenuRequested.connect(self._show_duplicate_table_context_menu)
-        self.addTab(self.duplicate_table, "重複ペア (0)")
+        # 重複ペアタブは廃止し、類似ペアタブに統合（互換性のために属性は維持）
+        self.duplicate_table = self.similar_table
 
         self.error_table = self._create_error_table()
         self.addTab(self.error_table, "エラー (0)")
@@ -80,7 +78,6 @@ class ResultsTabsWidget(QTabWidget):
         # シグナル接続
         self.blurry_table.itemSelectionChanged.connect(self.selection_changed.emit)
         self.similar_table.itemSelectionChanged.connect(self.selection_changed.emit)
-        self.duplicate_table.itemSelectionChanged.connect(self.selection_changed.emit)
         self.error_table.itemSelectionChanged.connect(self.selection_changed.emit)
         self.currentChanged.connect(lambda index: self.selection_changed.emit())
 
@@ -166,14 +163,22 @@ class ResultsTabsWidget(QTabWidget):
         # フィルタリング
         filtered_blurry = [item for item in blurry_results if os.path.exists(item['path'])]
         filtered_similar = [item for item in similar_results if os.path.exists(str(item[0])) and os.path.exists(str(item[1]))]
+        
+        # 重複ペアを類似ペアに変換（類似度100%として）
         duplicate_pairs = self._flatten_duplicates_to_pairs(duplicate_results)
-        filtered_duplicates = [pair for pair in duplicate_pairs if os.path.exists(pair['path1']) and os.path.exists(pair['path2'])]
+        duplicate_as_similar = []
+        for pair in duplicate_pairs:
+            if os.path.exists(pair['path1']) and os.path.exists(pair['path2']):
+                # 重複ペアを類似ペアの形式に変換し、類似度を100%とする
+                duplicate_as_similar.append([pair['path1'], pair['path2'], 100])
+        
+        # 類似ペアと重複ペアを統合
+        combined_similar_results = filtered_similar + duplicate_as_similar
         filtered_errors = scan_errors
 
         # テーブル更新
         self._populate_table(self.blurry_table, filtered_blurry, self._create_blurry_row_items)
-        self._populate_table(self.similar_table, filtered_similar, self._create_similar_row_items)
-        self._populate_table(self.duplicate_table, filtered_duplicates, self._create_duplicate_row_items)
+        self._populate_table(self.similar_table, combined_similar_results, self._create_similar_row_items)
         self._populate_table(self.error_table, filtered_errors, self._create_error_row_items)
         self._update_tab_texts()
 
@@ -247,8 +252,19 @@ class ResultsTabsWidget(QTabWidget):
         path2_item = QTableWidgetItem(path2)
 
         # 類似度スコア
-        score_item = NumericTableWidgetItem(str(score))
+        # スコアが100の場合は特別な表示に（重複ファイル）
+        score_text = "完全一致（重複)" if score == 100 else str(score)
+        score_item = NumericTableWidgetItem(score_text)
         score_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        
+        # 重複ファイルの場合は背景色を変更して目立たせる
+        if score == 100:
+            # 行全体のアイテムに背景色を設定
+            highlight_color = QColor(255, 240, 240)  # 薄い赤色
+            for item in [chk1_item, name1_item, dim1_item, date1_item, path1_item,
+                        chk2_item, name2_item, dim2_item, date2_item, path2_item, 
+                        score_item]:
+                item.setBackground(highlight_color)
 
         # 新しい列順序に合わせてアイテムを返す
         # ["ファイル1 チェック", "ファイル1 ファイル名", "ファイル1 解像度", "ファイル1 作成日時", "ファイル1 パス",
@@ -326,18 +342,17 @@ class ResultsTabsWidget(QTabWidget):
         return [type_item, path_item, msg_item]
 
     def _update_tab_texts(self) -> None:
-        # (変更なし)
+        """タブのテキストを更新（行数を含める）"""
         self.setTabText(0, f"ブレ画像 ({self.blurry_table.rowCount()})")
-        self.setTabText(1, f"類似ペア ({self.similar_table.rowCount()})")
-        self.setTabText(2, f"重複ペア ({self.duplicate_table.rowCount()})")
-        self.setTabText(3, f"エラー ({self.error_table.rowCount()})")
+        self.setTabText(1, f"類似/重複ペア ({self.similar_table.rowCount()})")
+        self.setTabText(2, f"エラー ({self.error_table.rowCount()})")
 
     @Slot()
     def clear_results(self) -> None:
-        # (変更なし)
+        """すべての結果テーブルをクリアする"""
         self.blurry_table.setRowCount(0)
         self.similar_table.setRowCount(0)
-        self.duplicate_table.setRowCount(0)
+        # duplicate_table は similar_table と同じなので別途クリアする必要はない
         self.error_table.setRowCount(0)
         self._update_tab_texts()
 

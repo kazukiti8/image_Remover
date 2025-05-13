@@ -117,7 +117,124 @@ def get_file_info(file_path: str) -> FileInfoResult:
 
     return file_size_str, mod_time_str, dimensions_str, exif_date_str
 
-# --- 削除・ファイルを開く関数 (変更なし) ---
+# --- 画像ファイルの連番リネーム関数 ---
+def rename_images_to_sequence(directory_path: str, parent_widget: Optional[QWidget] = None) -> Tuple[int, List[ErrorDict]]:
+    """
+    指定されたディレクトリ内の画像ファイルをすべて連番(1, 2, 3...)にリネームする。
+    サブディレクトリは含めない。
+    
+    戻り値:
+    - 成功したリネーム数
+    - エラーのリスト（ファイルパスとエラーメッセージの辞書）
+    """
+    # 対象となる画像ファイル拡張子
+    image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
+    
+    # ディレクトリ内のファイル一覧を取得（サブディレクトリは含めない）
+    files_in_dir = [f for f in os.listdir(directory_path) 
+                   if os.path.isfile(os.path.join(directory_path, f)) and 
+                   os.path.splitext(f.lower())[1] in image_extensions]
+    
+    # 画像ファイルが存在しない場合
+    if not files_in_dir:
+        if parent_widget:
+            QMessageBox.information(parent_widget, "情報", "リネーム対象の画像ファイルが見つかりませんでした。")
+        return 0, []
+    
+    # リネーム前に確認ダイアログを表示
+    num_files = len(files_in_dir)
+    message = f"{num_files} 個の画像ファイルを連番にリネームします。\nこの操作は元に戻せません。続行しますか？\n\n"
+    display_limit = 10
+    if num_files <= display_limit:
+        message += "\n".join(files_in_dir)
+    else:
+        message += "\n".join(files_in_dir[:display_limit]) + f"\n...他 {num_files - display_limit} 個"
+    
+    if parent_widget:
+        reply = QMessageBox.question(parent_widget, "リネームの確認", message, 
+                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                                    QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            print("リネームがキャンセルされました。")
+            return 0, []
+    
+    # リネーム処理
+    renamed_count = 0
+    errors = []
+    
+    # 一時的に拡張子を保存してリネーム後に元の拡張子を使用
+    file_extensions = {file: os.path.splitext(file)[1] for file in files_in_dir}
+    
+    # 桁数を決定（例: 100個のファイルなら3桁）
+    digits = len(str(num_files))
+    
+    # リネーム用の一時ディレクトリ（衝突を避けるため）
+    temp_dir = os.path.join(directory_path, "__temp_rename__")
+    try:
+        if not os.path.exists(temp_dir):
+            os.makedirs(temp_dir)
+        
+        # 1. まず一時ディレクトリにリネームして移動（ファイル名の衝突を避けるため）
+        for i, file in enumerate(sorted(files_in_dir), 1):
+            original_path = os.path.join(directory_path, file)
+            temp_path = os.path.join(temp_dir, f"_temp_{i:0{digits}d}{file_extensions[file]}")
+            try:
+                os.rename(original_path, temp_path)
+            except Exception as e:
+                errors.append({'path': original_path, 'error': str(e)})
+                print(f"エラー（一時移動）: {file} - {e}")
+        
+        # 2. 一時ディレクトリから元のディレクトリに連番でリネームして戻す
+        for i, file in enumerate(sorted([f for f in os.listdir(temp_dir) if f.startswith('_temp_')]), 1):
+            temp_path = os.path.join(temp_dir, file)
+            ext = os.path.splitext(file)[1]
+            new_path = os.path.join(directory_path, f"{i:0{digits}d}{ext}")
+            try:
+                os.rename(temp_path, new_path)
+                renamed_count += 1
+                print(f"リネーム成功: {i:0{digits}d}{ext}")
+            except Exception as e:
+                errors.append({'path': temp_path, 'error': str(e)})
+                print(f"エラー（リネーム）: {file} - {e}")
+        
+    except Exception as e:
+        if parent_widget:
+            QMessageBox.critical(parent_widget, "エラー", f"リネーム処理中にエラーが発生しました: {e}")
+        errors.append({'path': directory_path, 'error': str(e)})
+        print(f"致命的なエラー: {e}")
+    finally:
+        # 一時ディレクトリの削除（残っているファイルがあれば元のディレクトリに戻す）
+        if os.path.exists(temp_dir):
+            for file in os.listdir(temp_dir):
+                try:
+                    temp_path = os.path.join(temp_dir, file)
+                    # 元の名前が分からないのでランダムな名前で戻す
+                    recovery_name = f"recovered_{int(time.time())}_{file}"
+                    os.rename(temp_path, os.path.join(directory_path, recovery_name))
+                    print(f"復旧: {file} -> {recovery_name}")
+                except Exception as e:
+                    print(f"一時ファイル移動エラー: {file} - {e}")
+            try:
+                os.rmdir(temp_dir)  # 空になったディレクトリを削除
+            except Exception as e:
+                print(f"一時ディレクトリ削除エラー: {e}")
+    
+    # 結果表示
+    if parent_widget:
+        if errors:
+            error_details = "\n".join([f"- {os.path.basename(e['path'])}: {e['error']}" for e in errors[:5]])
+            if len(errors) > 5:
+                error_details += f"\n...他 {len(errors) - 5} 件のエラー"
+            QMessageBox.warning(parent_widget, "リネームエラー", 
+                              f"{len(errors)} 個のファイルのリネーム中にエラーが発生しました:\n{error_details}")
+        
+        if renamed_count > 0:
+            QMessageBox.information(parent_widget, "リネーム完了", 
+                                   f"{renamed_count} 個のファイルを連番にリネームしました。")
+    
+    return renamed_count, errors
+
+# --- 削除・ファイルを開く関数 ---
 def delete_files_to_trash(file_paths: List[str], parent_widget: Optional[QWidget] = None) -> DeleteResult:
     if send2trash is None:
         QMessageBox.critical(parent_widget, "エラー", "send2trash ライブラリが見つかりません。\n削除機能を使用できません。")
