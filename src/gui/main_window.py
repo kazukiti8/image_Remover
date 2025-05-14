@@ -1157,10 +1157,6 @@ class ImageCleanerWindow(QMainWindow):
         if cancel_enabled is not None:
             self.cancel_button.setVisible(cancel_enabled)
             self.cancel_button.setEnabled(cancel_enabled)
-        
-        # メニューアクションの状態も更新
-        if hasattr(self, 'settings_action'):
-            self.settings_action.setEnabled(self.settings_button.isEnabled())
 
     # --- イベントハンドラ ---
     def closeEvent(self, event: QCloseEvent) -> None:
