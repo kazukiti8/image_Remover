@@ -7,21 +7,39 @@ from typing import Any, List # ★ List をインポート ★
 # === カスタム QTableWidgetItem サブクラス定義 ===
 
 class NumericTableWidgetItem(QTableWidgetItem):
-    """数値としてソート可能なテーブルアイテム"""
     def __lt__(self, other: Any) -> bool:
         try:
             self_text: str = self.text()
             other_text: str = other.text()
-            # エラー文字列や空文字は比較のために最小値として扱う
+
+            # "完全一致（重複）" のような文字列を特別扱いする
+            self_is_special_string = self_text == "完全一致（重複）"
+            other_is_special_string = other_text == "完全一致（重複）"
+
+            # 両方とも特別文字列の場合、テキストで比較（同じなので等価）
+            if self_is_special_string and other_is_special_string:
+                return False # 同じ値なので self < other は False
+
+            # 片方だけが特別文字列の場合の処理 (例: 特別文字列を最大値または最小値として扱う)
+            # ここでは例として、特別文字列を数値よりも「大きい」ものとして扱います
+            # (ソート順を調整したい場合は、ここのロジックを変更してください)
+            if self_is_special_string:
+                return False # self が特別文字列なら、other (数値のはず) より小さくはない
+            if other_is_special_string:
+                return True  # other が特別文字列なら、self (数値のはず) は other より小さい
+
+            # 通常の数値比較
             self_value: float = float(self_text) if self_text and self_text not in ["N/A", "読込エラー", "エラー", "削除済?"] else -float('inf')
             other_value: float = float(other_text) if other_text and other_text not in ["N/A", "読込エラー", "エラー", "削除済?"] else -float('inf')
-            # 両方がエラー値の場合、テキストで比較（順序は保証されないが一貫性のため）
+
             if self_value == -float('inf') and other_value == -float('inf'):
-                 return self_text < other_text
+                 return self_text < other_text # 両方エラー値ならテキスト比較
             return self_value < other_value
         except (ValueError, TypeError):
+            # 型エラーや値エラーが発生した場合 (例: other.text() が予期しない形式)
             if isinstance(other, QTableWidgetItem):
-                return super().__lt__(other)
+                # ★★★ 修正箇所 ★★★
+                return QTableWidgetItem.__lt__(self, other)
             return NotImplemented
 
 class FileSizeTableWidgetItem(QTableWidgetItem):
