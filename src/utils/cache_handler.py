@@ -18,19 +18,26 @@ class CacheHandler:
     ファイルベースのシンプルなキャッシュ（MD5, pHashなど）を管理するクラス。
     キャッシュはスキャン対象ディレクトリ内の隠しフォルダに保存される。
     """
-    def __init__(self, target_directory: str):
+    def __init__(self, target_directory: str, use_cache: bool = True):
         """
         Args:
             target_directory (str): スキャン対象のディレクトリパス。
+            use_cache (bool): キャッシュを使用するかどうか。デフォルトはTrue。
         """
         if not os.path.isdir(target_directory):
             raise ValueError(f"指定されたディレクトリが存在しません: {target_directory}")
+        
+        self.target_directory = target_directory
+        self.use_cache = use_cache
         self.cache_dir = os.path.join(target_directory, CACHE_DIR_NAME)
         self.md5_cache_path = os.path.join(self.cache_dir, MD5_CACHE_FILENAME)
         self.phash_cache_path = os.path.join(self.cache_dir, PHASH_CACHE_FILENAME)
         self._md5_cache: Optional[CacheData] = None
         self._phash_cache: Optional[CacheData] = None
-        self._ensure_cache_dir()
+        
+        # キャッシュを使用する場合のみディレクトリを作成
+        if self.use_cache:
+            self._ensure_cache_dir()
 
     def _ensure_cache_dir(self):
         """キャッシュディレクトリが存在することを確認・作成する"""
@@ -51,8 +58,10 @@ class CacheHandler:
 
     def _load_cache(self, cache_path: str) -> CacheData:
         """指定されたパスからキャッシュデータを読み込む"""
-        if not os.path.exists(cache_path):
+        # キャッシュ無効またはファイルが存在しない場合は空のデータを返す
+        if not self.use_cache or not os.path.exists(cache_path):
             return {}
+            
         try:
             with open(cache_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -75,9 +84,18 @@ class CacheHandler:
 
     def _save_cache(self, cache_path: str, cache_data: CacheData) -> bool:
         """指定されたパスにキャッシュデータを保存する"""
-        if not os.path.exists(self.cache_dir):
-            print("警告: キャッシュディレクトリが存在しないため、キャッシュを保存できません。")
+        # キャッシュが無効な場合は保存しない
+        if not self.use_cache:
             return False
+            
+        # キャッシュディレクトリが存在しなければ作成を試みる
+        if not os.path.exists(self.cache_dir):
+            try:
+                self._ensure_cache_dir()
+            except Exception as e:
+                print(f"警告: キャッシュディレクトリの作成に失敗しました。キャッシュを保存できません: {e}")
+                return False
+                
         try:
             # CacheEntry のタプルをリストに変換して保存 (JSON互換性)
             data_to_save = {k: list(v) for k, v in cache_data.items()}
@@ -125,6 +143,10 @@ class CacheHandler:
         Returns:
             Optional[Any]: キャッシュされた値 (有効な場合)。無効または存在しない場合は None。
         """
+        # キャッシュが無効な場合は常にNoneを返す
+        if not self.use_cache:
+            return None
+            
         try:
             current_mtime = os.path.getmtime(file_path)
             cache = self._get_cache(cache_type)
@@ -156,6 +178,10 @@ class CacheHandler:
             file_path (str): 対象ファイルのパス。
             value (Any): キャッシュする値。
         """
+        # キャッシュが無効な場合は何もしない
+        if not self.use_cache:
+            return
+            
         try:
             current_mtime = os.path.getmtime(file_path)
             cache = self._get_cache(cache_type)
@@ -167,6 +193,10 @@ class CacheHandler:
 
     def save_all(self):
         """メモリ上の全てのキャッシュデータをファイルに保存する"""
+        # キャッシュが無効な場合は何もしない
+        if not self.use_cache:
+            return
+            
         print("キャッシュデータをファイルに保存中...")
         self._save_cache_data('md5')
         self._save_cache_data('phash')
@@ -177,6 +207,8 @@ class CacheHandler:
         print("全てのキャッシュをクリアしています...")
         self._md5_cache = {}
         self._phash_cache = {}
+        
+        # キャッシュディレクトリとファイルが存在する場合のみ削除を試みる
         try:
             if os.path.exists(self.md5_cache_path):
                 os.remove(self.md5_cache_path)

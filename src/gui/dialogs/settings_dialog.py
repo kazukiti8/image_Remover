@@ -31,6 +31,10 @@ SIMILARITY_MODES: Dict[str, str] = {
 # ★★★ ヘルプテキスト定義 ★★★
 HELP_TEXTS = {
     "scan_subdirectories": "オンにすると、選択したフォルダ内のサブフォルダも再帰的にスキャン対象とします。",
+    "use_cache": "オンにすると、スキャン結果（MD5、pHash値など）をキャッシュとして対象フォルダ内に保存します。\n\nキャッシュを使用すると、再スキャン時の処理が高速化されます。\nキャッシュは対象フォルダ内の非表示フォルダに保存されます。",
+    "auto_save_state": "オンにすると、スキャン処理中に一定間隔で進行状況を自動保存します。\n\nアプリケーションが予期せず終了した場合でも、次回起動時に中断した地点から再開できます。\n状態ファイルはスキャン対象フォルダ内に保存されます。",
+    "auto_restore_on_start": "オンにすると、アプリケーション起動時に自動的に中断データを確認し、\n復元オプションを表示します。",
+    "auto_save_interval": "スキャン中に何ファイル処理するごとに状態を自動保存するかを指定します。\n\n値を小さくすると、より頻繁に保存されますが、パフォーマンスが低下する可能性があります。\n値を大きくすると、保存頻度は下がりますが、クラッシュ時に失われる作業量が増えます。",
     "blur_algorithm": "画像のブレ（ボケ）を検出する方法を選択します。\n\n"
                       "- FFT: 画像全体の周波数成分を分析します。比較的大きなボケや全体的なシャープネスの欠如に有効です。\n"
                       "- Laplacian: 画像のエッジ（輪郭）の鋭さを評価します。ピンボケのような細かいボケの検出に向いています。",
@@ -73,8 +77,12 @@ class SettingsDialog(QDialog):
         self.current_settings = copy.deepcopy(current_settings)
         self.presets: Dict[str, SettingsDict] = self.current_settings.get('presets', {})
 
-        # ウィジェットの型ヒント (変更なし)
+        # ウィジェットの型ヒント
         self.scan_subdirectories_checkbox: QCheckBox
+        self.use_cache_checkbox: QCheckBox
+        self.auto_save_state_checkbox: QCheckBox
+        self.auto_restore_on_start_checkbox: QCheckBox
+        self.auto_save_interval_spinbox: QSpinBox
         self.blur_algorithm_label: QLabel; self.blur_algorithm_combobox: QComboBox
         self.blur_threshold_label: QLabel; self.blur_threshold_spinbox: QSpinBox
         self.blur_laplacian_threshold_label: QLabel; self.blur_laplacian_threshold_spinbox: QSpinBox
@@ -164,7 +172,51 @@ class SettingsDialog(QDialog):
         self.scan_subdirectories_checkbox.setChecked(bool(self.current_settings.get('scan_subdirectories', False)))
         # ★ ヘルプボタン付きで追加 ★
         general_layout.addRow(self._create_widget_with_help(self.scan_subdirectories_checkbox, HELP_TEXTS["scan_subdirectories"]))
+        
+        # キャッシュ設定チェックボックスを追加
+        self.use_cache_checkbox = QCheckBox("キャッシュを使用する")
+        self.use_cache_checkbox.setChecked(bool(self.current_settings.get('use_cache', True)))  # デフォルトは有効
+        general_layout.addRow(self._create_widget_with_help(self.use_cache_checkbox, HELP_TEXTS["use_cache"]))
+        
         main_layout.addWidget(general_group)
+        
+        # --- 状態の自動保存と復元設定 ---
+        auto_save_group = QGroupBox("状態の自動保存と復元")
+        auto_save_layout = QFormLayout(auto_save_group)
+        
+        # 自動保存有効チェックボックス
+        self.auto_save_state_checkbox = QCheckBox("処理中に状態を自動保存する")
+        self.auto_save_state_checkbox.setChecked(bool(self.current_settings.get('auto_save_state', True)))
+        auto_save_layout.addRow(self._create_widget_with_help(self.auto_save_state_checkbox, HELP_TEXTS["auto_save_state"]))
+        
+        # 自動復元有効チェックボックス
+        self.auto_restore_on_start_checkbox = QCheckBox("起動時に中断状態を自動確認")
+        self.auto_restore_on_start_checkbox.setChecked(bool(self.current_settings.get('auto_restore_on_start', True)))
+        auto_save_layout.addRow(self._create_widget_with_help(self.auto_restore_on_start_checkbox, HELP_TEXTS["auto_restore_on_start"]))
+        
+        # 自動保存間隔設定
+        auto_save_interval_container = QWidget()
+        auto_save_interval_layout = QHBoxLayout(auto_save_interval_container)
+        auto_save_interval_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.auto_save_interval_spinbox = QSpinBox()
+        self.auto_save_interval_spinbox.setRange(10, 1000)
+        self.auto_save_interval_spinbox.setSingleStep(10)
+        self.auto_save_interval_spinbox.setValue(int(self.current_settings.get('auto_save_interval', 100)))
+        self.auto_save_interval_spinbox.setMinimumWidth(100)
+        auto_save_interval_layout.addWidget(self.auto_save_interval_spinbox)
+        
+        auto_save_interval_label = QLabel("ファイル処理ごと")
+        auto_save_interval_layout.addWidget(auto_save_interval_label)
+        auto_save_interval_layout.addStretch()
+        
+        # 自動保存間隔の有効/無効を自動保存チェックボックスと連動
+        self.auto_save_state_checkbox.toggled.connect(self.auto_save_interval_spinbox.setEnabled)
+        self.auto_save_interval_spinbox.setEnabled(self.auto_save_state_checkbox.isChecked())
+        
+        auto_save_layout.addRow("保存間隔:", self._create_widget_with_help(auto_save_interval_container, HELP_TEXTS["auto_save_interval"]))
+        
+        main_layout.addWidget(auto_save_group)
 
         # --- ブレ検出設定 ---
         blur_group = QGroupBox("ブレ検出")
@@ -337,6 +389,11 @@ class SettingsDialog(QDialog):
     def _apply_settings_to_ui(self, settings_data: SettingsDict):
         """設定辞書をUIに反映する"""
         self.scan_subdirectories_checkbox.setChecked(bool(settings_data.get('scan_subdirectories', False)))
+        self.use_cache_checkbox.setChecked(bool(settings_data.get('use_cache', True)))
+        self.auto_save_state_checkbox.setChecked(bool(settings_data.get('auto_save_state', True)))
+        self.auto_restore_on_start_checkbox.setChecked(bool(settings_data.get('auto_restore_on_start', True)))
+        self.auto_save_interval_spinbox.setValue(int(settings_data.get('auto_save_interval', 100)))
+        self.auto_save_interval_spinbox.setEnabled(self.auto_save_state_checkbox.isChecked())
 
         blur_algo = str(settings_data.get('blur_algorithm', 'fft'))
         blur_idx = self.blur_algorithm_combobox.findData(blur_algo)
@@ -368,6 +425,10 @@ class SettingsDialog(QDialog):
         """現在のUIの状態から設定辞書を取得する"""
         settings = {}
         settings['scan_subdirectories'] = self.scan_subdirectories_checkbox.isChecked()
+        settings['use_cache'] = self.use_cache_checkbox.isChecked()
+        settings['auto_save_state'] = self.auto_save_state_checkbox.isChecked()
+        settings['auto_restore_on_start'] = self.auto_restore_on_start_checkbox.isChecked()
+        settings['auto_save_interval'] = self.auto_save_interval_spinbox.value()
         settings['blur_algorithm'] = self.blur_algorithm_combobox.currentData()
 
         fft_int = self.blur_threshold_spinbox.value()

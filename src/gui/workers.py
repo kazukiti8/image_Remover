@@ -75,17 +75,26 @@ class ScanWorker(QRunnable):
         self.signals: WorkerSignals = WorkerSignals()
         self.file_extensions: Tuple[str, ...] = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp', '.heic', '.heif')
         self._cancellation_requested: bool = False
-        self.state_save_interval: int = 100
+        
+        # 設定から自動保存関連の設定を読み込む
+        self.auto_save_enabled: bool = bool(self.settings.get('auto_save_state', True))
+        self.state_save_interval: int = int(self.settings.get('auto_save_interval', 100))
 
         # パフォーマンス改善点 1: 並列処理数の調整
         self.max_workers: Optional[int] = max(1, (os.cpu_count() // 2) if os.cpu_count() else 1)
         print(f"INFO: Using max_workers = {self.max_workers}")
 
         self.cache_handler: Optional[CacheHandler] = None
+        # 設定から use_cache フラグを取得（デフォルトは True）
+        use_cache: bool = bool(self.settings.get('use_cache', True))
+        
         if CacheHandler:
             try:
-                self.cache_handler = CacheHandler(self.directory_path)
-                print(f"キャッシュハンドラを初期化しました: {self.cache_handler.cache_dir}")
+                self.cache_handler = CacheHandler(self.directory_path, use_cache=use_cache)
+                if use_cache:
+                    print(f"キャッシュハンドラを初期化しました: {self.cache_handler.cache_dir}")
+                else:
+                    print("キャッシュは無効に設定されています。キャッシュは使用されません。")
             except ValueError as e: print(f"警告: キャッシュハンドラの初期化に失敗: {e}")
             except Exception as e: print(f"警告: キャッシュハンドラの初期化中に予期せぬエラー: {e}")
 
@@ -126,7 +135,11 @@ class ScanWorker(QRunnable):
         else: self.compared_pairs_similar = set()
 
     def _save_state(self) -> bool:
-        # (変更なし)
+        # 自動保存が無効な場合はスキップ (ただし明示的な中断時は例外)
+        if not self.auto_save_enabled and not self._cancellation_requested:
+            return False
+            
+        # 状態データを準備
         state_data: ScanStateData = {
             "target_directory": self.directory_path, "settings_used": self.settings,
             "all_image_paths": self.all_image_paths, "processed_paths_blur": list(self.processed_paths_blur), # setはlistに変換
@@ -134,7 +147,11 @@ class ScanWorker(QRunnable):
             "blurry_results": self.blurry_results, "duplicate_results": self.duplicate_results,
             "similar_pair_results": self.similar_pair_results, "processing_errors": self.processing_errors
         }
-        if self.cache_handler: self.cache_handler.save_all()
+        # キャッシュも同時に保存
+        if self.cache_handler and self.cache_handler.use_cache:
+            self.cache_handler.save_all()
+            
+        # 状態を保存して結果を返す
         return save_scan_state(self.directory_path, state_data) # results_handler側でNumPy型変換
 
     def request_cancellation(self) -> None:

@@ -9,6 +9,11 @@ SETTINGS_FILE: str = os.path.join(os.path.expanduser("~"), ".image_cleaner_setti
 DEFAULT_SETTINGS: Dict[str, Any] = {
     # スキャン設定
     'scan_subdirectories': False,
+    'use_cache': True,  # デフォルトではキャッシュを使用する
+    # スキャン状態の自動保存と復元
+    'auto_save_state': True,  # スキャン中に定期的に状態を自動保存
+    'auto_restore_on_start': True,  # 起動時に前回の中断状態を自動チェック
+    'auto_save_interval': 100,  # 何ファイル処理するごとに状態を保存するか
     # ブレ検出設定
     'blur_algorithm': 'fft',
     'blur_threshold': 0.80,
@@ -23,9 +28,22 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     'last_directory': os.path.expanduser("~"),
     'last_save_load_dir': os.path.expanduser("~"),
     'presets': {},
-    # ★★★ テーマ設定を追加 (デフォルトは 'light') ★★★
-    'theme': 'light' # 'light' or 'dark'
-    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    # テーマ設定
+    'theme': 'light', # 'light' or 'dark'
+    # フィルター設定
+    'filters': {
+        'blurry': {
+            'min_score': 0.0,
+            'max_score': 1.0,
+            'filename': ''
+        },
+        'similarity': {
+            'min_similarity': 0,
+            'max_similarity': 100,
+            'duplicates_only': False,
+            'filename': ''
+        }
+    }
 }
 # 型エイリアス
 SettingsDict = Dict[str, Any]

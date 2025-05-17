@@ -1,12 +1,20 @@
 # gui/widgets/results_tabs_widget.py
 import os
+import re
 from PySide6.QtWidgets import (QWidget, QTabWidget, QTableWidget, QHeaderView,
                                QAbstractItemView, QTableWidgetItem, QMenu,
-                               QStyledItemDelegate, QStyleOptionViewItem, QCheckBox) # QCheckBox をインポート
-from PySide6.QtCore import Qt, Signal, Slot, QPoint, QModelIndex
+                               QStyledItemDelegate, QStyleOptionViewItem, QCheckBox,
+                               QVBoxLayout, QHBoxLayout, QPushButton, QSplitter) # 追加のウィジェット
+from PySide6.QtCore import Qt, Signal, Slot, QPoint, QModelIndex, QSize
 from PySide6.QtGui import QAction, QColor
-from typing import List, Dict, Tuple, Optional, Any, Union, Set
+from typing import List, Dict, Tuple, Optional, Any, Union, Set, Callable
 import datetime # get_file_info のフォールバック用
+
+# フィルターウィジェットをインポート
+try:
+    from .filter_widgets import BlurryFilterWidget, SimilarityFilterWidget
+except ImportError:
+    print("エラー: filter_widgets モジュールのインポートに失敗しました。フィルター機能は無効化されます。")
 
 # 型エイリアス
 BlurResultItem = Dict[str, Union[str, float]]
@@ -57,21 +65,74 @@ class ResultsTabsWidget(QTabWidget):
         self.similar_table: QTableWidget
         self.duplicate_table: QTableWidget
         self.error_table: QTableWidget
+        self.blurry_filter: Optional[BlurryFilterWidget] = None
+        self.similarity_filter: Optional[SimilarityFilterWidget] = None
+        
+        # フィルター関連の変数
+        self._full_blurry_data: List[BlurResultItem] = []
+        self._full_similar_data: List[SimilarPair] = []
+        self._full_duplicate_pairs: List[DuplicatePair] = []
+        
         self._setup_tabs()
 
     def _setup_tabs(self) -> None:
         """タブとテーブルを作成し、シグナルを接続する"""
+        # ブレ画像タブのコンテナを作成
+        blurry_container = QWidget()
+        blurry_layout = QVBoxLayout(blurry_container)
+        blurry_layout.setContentsMargins(5, 5, 5, 5)
+        
+        # ブレ画像テーブルとフィルターウィジェットを横に並べるスプリッタを作成
+        blurry_splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # ブレ画像テーブルを作成
         self.blurry_table = self._create_blurry_table()
-        self.addTab(self.blurry_table, "ブレ画像 (0)")
-
+        blurry_splitter.addWidget(self.blurry_table)
+        
+        # フィルターウィジェットの作成と配置
+        try:
+            self.blurry_filter = BlurryFilterWidget()
+            self.blurry_filter.filter_changed.connect(self._apply_blurry_filter)
+            blurry_splitter.addWidget(self.blurry_filter)
+            # 初期スプリッターの比率設定（テーブル:フィルター = 7:3）
+            blurry_splitter.setSizes([700, 300])
+        except (NameError, TypeError):
+            print("警告: BlurryFilterWidget が使用できないため、フィルター機能は無効化されます。")
+        
+        blurry_layout.addWidget(blurry_splitter)
+        self.addTab(blurry_container, "ブレ画像 (0)")
+        
+        # 類似/重複ペアタブのコンテナを作成
+        similar_container = QWidget()
+        similar_layout = QVBoxLayout(similar_container)
+        similar_layout.setContentsMargins(5, 5, 5, 5)
+        
+        # 類似/重複ペアテーブルとフィルターウィジェットを横に並べるスプリッタを作成
+        similar_splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # 類似/重複ペアテーブルを作成
         self.similar_table = self._create_similar_table()
         self.similar_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.similar_table.customContextMenuRequested.connect(self._show_similar_table_context_menu)
-        self.addTab(self.similar_table, "類似/重複ペア (0)")
+        similar_splitter.addWidget(self.similar_table)
+        
+        # フィルターウィジェットの作成と配置
+        try:
+            self.similarity_filter = SimilarityFilterWidget()
+            self.similarity_filter.filter_changed.connect(self._apply_similarity_filter)
+            similar_splitter.addWidget(self.similarity_filter)
+            # 初期スプリッターの比率設定（テーブル:フィルター = 7:3）
+            similar_splitter.setSizes([700, 300])
+        except (NameError, TypeError):
+            print("警告: SimilarityFilterWidget が使用できないため、フィルター機能は無効化されます。")
+        
+        similar_layout.addWidget(similar_splitter)
+        self.addTab(similar_container, "類似/重複ペア (0)")
 
         # 重複ペアタブは廃止し、類似ペアタブに統合（互換性のために属性は維持）
         self.duplicate_table = self.similar_table
 
+        # エラータブは単純なテーブルのまま
         self.error_table = self._create_error_table()
         self.addTab(self.error_table, "エラー (0)")
 
@@ -160,7 +221,7 @@ class ResultsTabsWidget(QTabWidget):
     @Slot(list, list, dict, list)
     def populate_results(self, blurry_results: List[BlurResultItem], similar_results: List[SimilarPair], duplicate_results: DuplicateDict, scan_errors: List[ErrorDict]) -> None:
         """結果データをフィルタリングし、テーブルに表示する"""
-        # フィルタリング
+        # フィルタリング（存在するファイルのみ）
         filtered_blurry = [item for item in blurry_results if os.path.exists(item['path'])]
         filtered_similar = [item for item in similar_results if os.path.exists(str(item[0])) and os.path.exists(str(item[1]))]
         
@@ -172,14 +233,108 @@ class ResultsTabsWidget(QTabWidget):
                 # 重複ペアを類似ペアの形式に変換し、類似度を100%とする
                 duplicate_as_similar.append([pair['path1'], pair['path2'], 100])
         
-        # 類似ペアと重複ペアを統合
-        combined_similar_results = filtered_similar + duplicate_as_similar
-        filtered_errors = scan_errors
-
+        # フィルター適用のためにフルデータを保存
+        self._full_blurry_data = filtered_blurry
+        self._full_similar_data = filtered_similar + duplicate_as_similar
+        self._full_duplicate_pairs = duplicate_pairs
+        
+        # フィルターを適用（もしフィルターがアクティブなら）
+        self._apply_all_filters()
+        
+        # エラーデータは常にフィルターなしで表示
+        self._populate_table(self.error_table, scan_errors, self._create_error_row_items)
+        self._update_tab_texts()
+    
+    def _apply_all_filters(self) -> None:
+        """全てのフィルターを適用する"""
+        # ブレ画像フィルター適用
+        if self.blurry_filter is not None:
+            self._apply_blurry_filter()
+        else:
+            # フィルターがない場合は全データを表示
+            self._populate_table(self.blurry_table, self._full_blurry_data, self._create_blurry_row_items)
+        
+        # 類似度フィルター適用
+        if self.similarity_filter is not None:
+            self._apply_similarity_filter()
+        else:
+            # フィルターがない場合は全データを表示
+            self._populate_table(self.similar_table, self._full_similar_data, self._create_similar_row_items)
+    
+    @Slot()
+    def _apply_blurry_filter(self) -> None:
+        """ブレ画像データにフィルターを適用する"""
+        if not self.blurry_filter or not self._full_blurry_data:
+            return
+        
+        # フィルター条件を取得
+        criteria = self.blurry_filter.get_filter_criteria()
+        min_score = criteria.get('min_score', 0.0)
+        max_score = criteria.get('max_score', 1.0)
+        filename_filter = criteria.get('filename', '').lower()
+        
+        # フィルター適用
+        filtered_data = []
+        for item in self._full_blurry_data:
+            # スコアに基づくフィルタリング
+            score = float(item.get('score', -1.0))
+            if score < 0:  # スコアが無効な場合はスキップ
+                continue
+                
+            if score < min_score or score > max_score:
+                continue
+            
+            # ファイル名に基づくフィルタリング
+            if filename_filter:
+                path = item.get('path', '')
+                filename = os.path.basename(path).lower()
+                if filename_filter not in filename:
+                    continue
+            
+            filtered_data.append(item)
+        
         # テーブル更新
-        self._populate_table(self.blurry_table, filtered_blurry, self._create_blurry_row_items)
-        self._populate_table(self.similar_table, combined_similar_results, self._create_similar_row_items)
-        self._populate_table(self.error_table, filtered_errors, self._create_error_row_items)
+        self._populate_table(self.blurry_table, filtered_data, self._create_blurry_row_items)
+        self._update_tab_texts()
+    
+    @Slot()
+    def _apply_similarity_filter(self) -> None:
+        """類似/重複ペアデータにフィルターを適用する"""
+        if not self.similarity_filter or not self._full_similar_data:
+            return
+        
+        # フィルター条件を取得
+        criteria = self.similarity_filter.get_filter_criteria()
+        min_similarity = criteria.get('min_similarity', 0)
+        max_similarity = criteria.get('max_similarity', 100)
+        duplicates_only = criteria.get('duplicates_only', False)
+        filename_filter = criteria.get('filename', '').lower()
+        
+        # フィルター適用
+        filtered_data = []
+        for item in self._full_similar_data:
+            # 類似度に基づくフィルタリング
+            similarity = int(item[2])
+            
+            if duplicates_only and similarity < 100:
+                continue
+                
+            if similarity < min_similarity or similarity > max_similarity:
+                continue
+            
+            # ファイル名に基づくフィルタリング
+            if filename_filter:
+                path1 = str(item[0])
+                path2 = str(item[1])
+                filename1 = os.path.basename(path1).lower()
+                filename2 = os.path.basename(path2).lower()
+                if filename_filter not in filename1 and filename_filter not in filename2:
+                    continue
+            
+            filtered_data.append(item)
+        
+        # テーブル更新
+        self._populate_table(self.similar_table, filtered_data, self._create_similar_row_items)
         self._update_tab_texts()
 
     def _populate_table(self, table: QTableWidget, data: List[Any], item_creator_func) -> None:
@@ -355,6 +510,17 @@ class ResultsTabsWidget(QTabWidget):
         # duplicate_table は similar_table と同じなので別途クリアする必要はない
         self.error_table.setRowCount(0)
         self._update_tab_texts()
+        
+        # キャッシュしているデータもクリア
+        self._full_blurry_data = []
+        self._full_similar_data = []
+        self._full_duplicate_pairs = []
+        
+        # フィルターをリセット
+        if self.blurry_filter:
+            self.blurry_filter.reset_filters()
+        if self.similarity_filter:
+            self.similarity_filter.reset_filters()
 
     # --- 選択状態取得メソッド ---
     # ★★★ 選択状態取得ロジックを新しいカラムに合わせて修正 ★★★
@@ -668,12 +834,37 @@ class ResultsTabsWidget(QTabWidget):
     # --- データ取得メソッド ---
     # ★★★ データ取得ロジックを新しいカラムに合わせて修正 ★★★
     def get_results_data(self) -> ResultsData:
+        # フィルターがあっても元のフルデータを使用
+        # これにより保存されるデータはフィルターの影響を受けない
         return {
-            'blurry': self._get_blurry_data(),
+            'blurry': self._full_blurry_data if self._full_blurry_data else self._get_blurry_data(),
             'similar': self._get_similar_data(),
             'duplicates': self._get_duplicate_data_from_pairs(),
             'errors': self._get_error_data()
         }
+        
+    def get_filter_settings(self) -> Dict[str, Dict[str, Any]]:
+        """現在のフィルター設定を取得する"""
+        filter_settings = {}
+        
+        if self.blurry_filter:
+            filter_settings['blurry'] = self.blurry_filter.get_filter_criteria()
+            
+        if self.similarity_filter:
+            filter_settings['similarity'] = self.similarity_filter.get_filter_criteria()
+            
+        return filter_settings
+        
+    def set_filter_settings(self, settings: Dict[str, Dict[str, Any]]) -> None:
+        """フィルター設定を適用する"""
+        if 'blurry' in settings and self.blurry_filter:
+            self.blurry_filter.set_filter_criteria(settings['blurry'])
+            
+        if 'similarity' in settings and self.similarity_filter:
+            self.similarity_filter.set_filter_criteria(settings['similarity'])
+            
+        # 設定を適用したらフィルターを実行
+        self._apply_all_filters()
 
     def _get_blurry_data(self) -> List[BlurResultItem]:
         data: List[BlurResultItem] = []

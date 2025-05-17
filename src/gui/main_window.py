@@ -8,8 +8,8 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QFrame, QFileDialog, QProgressBar,
     QMessageBox, QMenuBar, QTableWidget, QAbstractItemView
 )
-from PySide6.QtCore import Qt, QThreadPool, Slot, QDir
-from PySide6.QtGui import QCloseEvent, QKeyEvent, QAction, QActionGroup
+from PySide6.QtCore import Qt, QThreadPool, Slot, QDir, QMimeData, QUrl
+from PySide6.QtGui import QCloseEvent, QKeyEvent, QAction, QActionGroup, QDragEnterEvent, QDragMoveEvent, QDropEvent
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional, Any, Union, Set
 
@@ -63,6 +63,8 @@ class ImageCleanerWindow(QMainWindow):
         self.setGeometry(100, 100, 1200, 800)
         self.threadpool: QThreadPool = QThreadPool()
         self.current_settings: SettingsDict = load_settings()
+        self.setAcceptDrops(True)  # ドラッグアンドドロップを有効化
+        self.filter_settings = self.current_settings.get('filters', {})
         # UI要素の型ヒント
         self.dir_label: QLabel
         self.dir_path_edit: QLineEdit
@@ -81,6 +83,7 @@ class ImageCleanerWindow(QMainWindow):
         self.select_all_blurry_button: QPushButton
         self.select_all_duplicates_button: QPushButton
         self.deselect_all_button: QPushButton
+        self.progress_count_label: QLabel  # 処理ファイル数表示用のラベル
         # --- その他のインスタンス変数 ---
         self.current_worker: Optional[ScanWorker] = None
         self.results_saved: bool = True
@@ -101,6 +104,10 @@ class ImageCleanerWindow(QMainWindow):
         if initial_dir and os.path.isdir(initial_dir):
             self.dir_path_edit.setText(initial_dir)
             self._set_scan_controls_enabled(True)
+            
+            # 自動復元設定が有効であれば、前回の中断データを確認
+            if self.current_settings.get('auto_restore_on_start', True):
+                self._check_for_interrupted_scan(initial_dir)
         else:
             self._set_scan_controls_enabled(False)
 
@@ -181,12 +188,26 @@ class ImageCleanerWindow(QMainWindow):
         self.current_file_label.setStyleSheet("font-size: 9pt; color: #666;")
         util_layout.addWidget(self.current_file_label)
         
-        # プログレスバーをこちらに移動
+        # プログレスバーとその下に処理ファイル数表示を配置
+        progress_frame = QFrame()
+        progress_layout = QVBoxLayout(progress_frame)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        progress_layout.setSpacing(2)
+        
         self.progress_bar = QProgressBar()
         self.progress_bar.setMinimum(0)
         self.progress_bar.setMaximum(100)
         self._set_progress_bar_visible(False) # 初期状態では非表示
-        util_layout.addWidget(self.progress_bar)
+        
+        self.progress_count_label = QLabel("")
+        self.progress_count_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.progress_count_label.setStyleSheet("font-size: 9pt; color: #444;")
+        self.progress_count_label.setVisible(False)  # 初期状態では非表示
+        
+        progress_layout.addWidget(self.progress_bar)
+        progress_layout.addWidget(self.progress_count_label)
+        
+        util_layout.addWidget(progress_frame)
 
         button_layout.addWidget(util_frame, 1)  # 右側を広く
         top_layout.addLayout(button_layout)
@@ -388,6 +409,53 @@ class ImageCleanerWindow(QMainWindow):
 
     # --- スロット関数 ---
     @Slot()
+    def _check_for_interrupted_scan(self, directory_path: str) -> None:
+        """指定されたディレクトリに中断されたスキャンデータがないか確認し、あれば再開オプションを表示する"""
+        if not directory_path or not os.path.isdir(directory_path):
+            return
+            
+        state_filepath = get_state_filepath(directory_path)
+        if not os.path.exists(state_filepath):
+            return
+            
+        # 中断データのタイムスタンプを確認
+        try:
+            with open(state_filepath, 'r', encoding='utf-8') as f:
+                state_data = json.load(f)
+            timestamp = state_data.get('save_timestamp', '不明')
+        except:
+            timestamp = '不明'
+            
+        # 再開するか確認
+        reply = QMessageBox.question(
+            self, "中断されたスキャンデータを検出",
+            f"前回の中断されたスキャンデータが見つかりました。\n" +
+            f"保存日時: {timestamp}\n\n" +
+            f"スキャンを再開しますか？\n\n" +
+            f"「いいえ」を選択すると、中断データは削除されません。\n" +
+            f"「キャンセル」を選択すると、何も行いません。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # 中断データを読み込んでスキャン再開
+            loaded_state, error_msg = load_scan_state(directory_path)
+            if error_msg:
+                QMessageBox.warning(self, "状態読み込みエラー", 
+                    f"中断データの読み込みに失敗しました:\n{error_msg}")
+                return
+                
+            self._clear_all_results()
+            self.status_label.setText("中断されたスキャンを再開します...")
+            self.start_scan(initial_state=loaded_state)
+        elif reply == QMessageBox.StandardButton.No:
+            # 何もしない（データは削除しない）
+            print("中断データの再開をスキップします。データは保持されます。")
+        else:
+            # キャンセル - 何もしない
+            print("中断データの確認をキャンセルしました。")
+    
     def select_directory(self) -> None:
         """「フォルダを選択...」ボタンがクリックされたときの処理"""
         last_dir: str = str(self.current_settings.get('last_directory', os.path.expanduser("~")))
@@ -494,11 +562,31 @@ class ImageCleanerWindow(QMainWindow):
     def update_status(self, message: str) -> None:
         """ScanWorkerからのステータス更新シグナルを受け取るスロット"""
         self.status_label.setText(message)
+        
+        # ステータスメッセージから処理ファイル数を抽出して進捗カウント表示に反映
+        import re
+        # 正規表現パターン: (X/Y) の形式を検出
+        count_pattern = r"\((\d+)/(\d+)\)"
+        match = re.search(count_pattern, message)
+        if match:
+            current, total = int(match.group(1)), int(match.group(2))
+            # フェーズ名を抽出（例: "ブレ検出中"）
+            phase_pattern = r"^(.*?) \("
+            phase_match = re.search(phase_pattern, message)
+            phase = phase_match.group(1) if phase_match else ""
+            self.update_progress_count(current, total, phase)
 
     @Slot(int)
     def update_progress_bar(self, value: int) -> None:
         """ScanWorkerからのプログレス更新シグナルを受け取るスロット"""
         self.progress_bar.setValue(value)
+        
+    def update_progress_count(self, current: int, total: int, phase: str = "") -> None:
+        """処理ファイル数の表示を更新する"""
+        if phase:
+            self.progress_count_label.setText(f"{phase}: {current}/{total} ファイル")
+        else:
+            self.progress_count_label.setText(f"{current}/{total} ファイル")
 
     @Slot(str)
     def update_current_file(self, filename: str) -> None:
@@ -515,6 +603,11 @@ class ImageCleanerWindow(QMainWindow):
         """ScanWorkerからの結果準備完了シグナルを受け取るスロット"""
         print("結果受信: Blurry={}, Similar={}, Duplicates={}, Errors={}".format(len(blurry), len(similar), len(duplicates), len(errors)))
         self.results_tabs_widget.populate_results(blurry, similar, duplicates, errors)
+        
+        # 保存されていたフィルター設定を適用
+        if hasattr(self.results_tabs_widget, 'set_filter_settings') and self.filter_settings:
+            self.results_tabs_widget.set_filter_settings(self.filter_settings)
+        
         has_results: bool = (self.results_tabs_widget.blurry_table.rowCount() > 0 or
                              self.results_tabs_widget.similar_table.rowCount() > 0 or
                              self.results_tabs_widget.duplicate_table.rowCount() > 0)
@@ -813,6 +906,12 @@ class ImageCleanerWindow(QMainWindow):
         QApplication.processEvents()
 
         results_data: ResultsData = self.results_tabs_widget.get_results_data()
+        
+        # フィルター設定も保存
+        if hasattr(self.results_tabs_widget, 'get_filter_settings'):
+            current_filters = self.results_tabs_widget.get_filter_settings()
+            if current_filters:
+                self.current_settings['filters'] = current_filters
 
         # 進捗表示を更新
         self.status_label.setText(f"ステータス: 結果をファイルに書き込み中...")
@@ -912,6 +1011,13 @@ class ImageCleanerWindow(QMainWindow):
 
         if settings_used:
             print("読み込んだ結果のスキャン時設定:", settings_used)
+            
+            # 保存されていたフィルター設定を適用
+            loaded_filters = settings_used.get('filters', {})
+            if loaded_filters and hasattr(self.results_tabs_widget, 'set_filter_settings'):
+                self.results_tabs_widget.set_filter_settings(loaded_filters)
+                # 設定を更新
+                self.filter_settings = loaded_filters
 
         # 進捗表示を完了に設定
         self.progress_bar.setValue(100)
@@ -1113,7 +1219,45 @@ class ImageCleanerWindow(QMainWindow):
             print(f"UI Update: Removing {len(files_actually_deleted)} items from tables.")
             self.results_tabs_widget.remove_items_by_paths(files_actually_deleted)
             self.results_saved = False
+            
+            # 削除されたファイルに関連するキャッシュデータを更新
+            self._update_cache_after_deletion(files_actually_deleted)
         return errors
+        
+    def _update_cache_after_deletion(self, deleted_files: Set[str]) -> None:
+        """ファイル削除後、キャッシュが存在する場合はそれを更新する"""
+        # 現在のディレクトリと設定をチェック
+        current_dir = self.dir_path_edit.text()
+        if not current_dir or not os.path.isdir(current_dir):
+            return
+            
+        # use_cache 設定を確認（デフォルトは True）
+        use_cache = self.current_settings.get('use_cache', True)
+        if not use_cache:
+            return
+        
+        try:
+            # utils.cache_handler をインポート
+            from utils.cache_handler import CacheHandler
+            
+            # キャッシュハンドラを初期化
+            cache_handler = CacheHandler(current_dir, use_cache=use_cache)
+            
+            # 各キャッシュタイプについて削除されたファイルのエントリを削除
+            for cache_type in ['md5', 'phash']:
+                cache = cache_handler._get_cache(cache_type)
+                for file_path in deleted_files:
+                    if file_path in cache:
+                        del cache[file_path]
+                        print(f"キャッシュから削除: {cache_type} - {os.path.basename(file_path)}")
+            
+            # 変更を保存
+            cache_handler.save_all()
+            print(f"削除されたファイル({len(deleted_files)}件)のキャッシュを更新しました。")
+        except ImportError:
+            print("警告: キャッシュハンドラのインポートに失敗しました。キャッシュの更新はスキップされます。")
+        except Exception as e:
+            print(f"警告: キャッシュの更新中にエラーが発生しました: {e}")
 
     def _set_scan_controls_enabled(self, enabled: bool) -> None:
         """スキャン関連のボタンの有効/無効を設定"""
@@ -1139,10 +1283,12 @@ class ImageCleanerWindow(QMainWindow):
             self.load_results_action.setEnabled(True)
 
     def _set_progress_bar_visible(self, visible: bool) -> None:
-        """プログレスバーの表示/非表示を設定"""
+        """プログレスバーとカウント表示の表示/非表示を設定"""
         self.progress_bar.setVisible(visible)
+        self.progress_count_label.setVisible(visible)
         if not visible:
             self.progress_bar.setValue(0)
+            self.progress_count_label.setText("")
 
     def _update_ui_state(self, scan_enabled: Optional[bool] = None, actions_enabled: Optional[bool] = None, cancel_enabled: Optional[bool] = None) -> None:
         """UIの各コントロールの有効/無効、表示/非表示を一括で更新する"""
@@ -1159,6 +1305,84 @@ class ImageCleanerWindow(QMainWindow):
             self.cancel_button.setEnabled(cancel_enabled)
 
     # --- イベントハンドラ ---
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        """ドラッグされたアイテムがウィンドウに入った時のイベント"""
+        mime_data: QMimeData = event.mimeData()
+        
+        # URLリストがあるか確認
+        if mime_data.hasUrls():
+            urls = mime_data.urls()
+            # 最初のURLがディレクトリかどうかを確認
+            if urls and urls[0].isLocalFile():
+                local_path = urls[0].toLocalFile()
+                if os.path.isdir(local_path):
+                    event.acceptProposedAction()
+                    self.status_label.setText("フォルダをドロップしてスキャン対象に設定できます")
+                    return
+        
+        # 許可しない場合
+        event.ignore()
+    
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        """ドラッグされたアイテムがウィンドウ内を移動している時のイベント"""
+        # dragEnterEventで既に判定しているのでそのまま受け入れる
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+    
+    def dropEvent(self, event: QDropEvent) -> None:
+        """アイテムがドロップされた時のイベント"""
+        mime_data: QMimeData = event.mimeData()
+        
+        if mime_data.hasUrls():
+            urls = mime_data.urls()
+            if urls and urls[0].isLocalFile():
+                dir_path = urls[0].toLocalFile()
+                if os.path.isdir(dir_path):
+                    # 既存の select_directory メソッドの処理内容を利用
+                    state_filepath = get_state_filepath(dir_path)
+                    resume_state: Optional[ScanStateData] = None
+
+                    if os.path.exists(state_filepath):
+                        reply = QMessageBox.question(
+                            self, "中断されたスキャン",
+                            f"選択されたフォルダには中断されたスキャンデータが存在します。\n({os.path.basename(state_filepath)})\n\nスキャンを再開しますか？\n\n「いいえ」を選択すると、中断データは削除され、新しいスキャンが開始されます。",
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                            QMessageBox.StandardButton.Yes
+                        )
+                        if reply == QMessageBox.StandardButton.Yes:
+                            loaded_state, error_msg = load_scan_state(dir_path)
+                            if error_msg:
+                                QMessageBox.warning(self, "状態読み込みエラー", f"中断データの読み込みに失敗しました:\n{error_msg}\n\n中断データは削除されます。")
+                                delete_scan_state(dir_path)
+                            else:
+                                resume_state = loaded_state
+                                print("スキャン再開を選択しました。")
+                        elif reply == QMessageBox.StandardButton.No:
+                            print("新規スキャンを選択しました。中断データを削除します...")
+                            delete_scan_state(dir_path)
+                        else:
+                            print("フォルダ選択をキャンセルしました。")
+                            return
+
+                    self.dir_path_edit.setText(dir_path)
+                    self.current_settings['last_directory'] = dir_path
+                    self._clear_all_results()
+                    self._update_ui_state(scan_enabled=True, actions_enabled=False, cancel_enabled=False)
+
+                    if resume_state:
+                        self.status_label.setText("中断されたスキャンを再開します...")
+                        self.start_scan(initial_state=resume_state)
+                    else:
+                        self.status_label.setText("フォルダをドロップしました。スキャンを開始してください。")
+                        
+                    event.acceptProposedAction()
+                    return
+        
+        # 許可しない場合
+        event.ignore()
+    
     def closeEvent(self, event: QCloseEvent) -> None:
         """ウィンドウが閉じられるときのイベント"""
         if self.current_worker and not self._cancellation_requested: # 中止要求フラグも確認
@@ -1179,6 +1403,12 @@ class ImageCleanerWindow(QMainWindow):
         if not self._confirm_unsaved_results("アプリケーションを終了"):
             event.ignore()
             return
+            
+        # フィルター設定を保存
+        if hasattr(self.results_tabs_widget, 'get_filter_settings'):
+            current_filters = self.results_tabs_widget.get_filter_settings()
+            if current_filters:
+                self.current_settings['filters'] = current_filters
 
         if not save_settings(self.current_settings):
             print("警告: 設定ファイルの保存に失敗しました。")
